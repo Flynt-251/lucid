@@ -1,0 +1,7 @@
+# Lucid Repository
+
+For each application, navigate to its directory and run `make` (no additional arguments).
+
+Ensure all dependencies are downloaded, otherwise run `<application>-install.sh`, keep in mind only DNF is currently supported.
+
+Before running the server, ensure a key and certificate have been created using `generate-certs.sh`, which requires `openssl`.
