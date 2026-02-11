@@ -15,15 +15,20 @@
 
 #define PORT 8888
 #define REALM "Lucid-Remote-Management"
-#define RESOURCE_LOCATION "/lucid-api"
-#define NOT_FOUND_RESPONSE "{\"clients\":[],\"status\":1,\"description\":\"Invalid URL\"}"
-#define INTERNAL_ERROR_RESPONSE "{\"clients\":[],\"status\":2,\"description\":\"Internal Server Error\"}"
-#define AUTH_CHECK "SELECT pass FROM observers WHERE email = ?"
-#define SELECT_QUERY "SELECT * FROM clientlist"
+#define JSON_RESOURCE_LOCATION "/lucid-api"
+#define JSON_NOT_FOUND_RESPONSE "{\"clients\":[],\"status\":1,\"description\":\"Invalid URL\"}"
+#define JSON_INTERNAL_ERROR_RESPONSE "{\"clients\":[],\"status\":2,\"description\":\"Internal Server Error\"}"
+#define SQL_AUTH_A "SELECT pass FROM "
+#define SQL_AUTH_B " WHERE email = ?"
+#define SQL_SELECT_QUERY "SELECT * FROM clientlist"
 #define SERVERKEYFILE "server.key"
 #define SERVERCERTFILE "server.pem"
 
+const unsigned int AUTH_FLAG_OBSERVER = 0;
+const unsigned int AUTH_FLAG_ADMIN = 1;
 char *login;
+
+// Admin Login: flynt@twofiveone.xyz, pass: flynt
 
 static size_t get_file_size(const char *filename) {
     FILE *fp;
@@ -91,7 +96,7 @@ const char* getClientList() {
         return json_object_to_json_string_ext(root, 0);
     }
     
-    if (mysql_query(con, SELECT_QUERY)) {
+    if (mysql_query(con, SQL_SELECT_QUERY)) {
         fprintf(stderr, "%s\n", mysql_error(con));
         json_object_object_add(root, "status", json_object_new_int(-2));
         json_object_object_add(root, "description", json_object_new_string("Failed to fetch client list."));
@@ -128,11 +133,24 @@ const char* getClientList() {
     return json_object_to_json_string_ext(root, 0);
 }
 
-int verifyObserver(struct MHD_Connection *conn) {
+int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
     struct MHD_BasicAuthInfo *auth_info;
     auth_info = MHD_basic_auth_get_username_password3(conn);
     if (auth_info == NULL)
         return 0;
+
+    char *table;
+    if (flag == AUTH_FLAG_OBSERVER)
+        table = "observers";
+    else if (flag == AUTH_FLAG_ADMIN)
+        table = "administrators";
+    else
+        return -10;
+
+    char *sqlAuthCheck = malloc(strlen(SQL_AUTH_A) + strlen(SQL_AUTH_B) + strlen(table) + 1);
+    strcpy(sqlAuthCheck, SQL_AUTH_A);
+    strcat(sqlAuthCheck, table);
+    strcat(sqlAuthCheck, SQL_AUTH_B);
 
     char *username = auth_info->username;
     char *password = auth_info->password;
@@ -157,8 +175,9 @@ int verifyObserver(struct MHD_Connection *conn) {
         printf("Failed to initialise SQL statement.\n");
         return -3;
     }
-    if (mysql_stmt_prepare(stmt, AUTH_CHECK, strlen(AUTH_CHECK))) {
+    if (mysql_stmt_prepare(stmt, sqlAuthCheck, strlen(sqlAuthCheck))) {
         printf("Failed to Prepare SQL statement.\n");
+        printf("%s\n%s\n", sqlAuthCheck, mysql_error(sql));
         return -4;
     }
     
@@ -211,7 +230,16 @@ int verifyObserver(struct MHD_Connection *conn) {
 
     int out = verify(passHash, password);
     mysql_close(sql);
+    free(sqlAuthCheck);
     return out;
+}
+
+static enum MHD_Result handleSimpleGet(struct MHD_Connection *conn, const char *filename) {
+    char *file = load_file(filename);
+    struct MHD_Response *response = MHD_create_response_from_buffer_static(strlen(file), file);
+    enum MHD_Result ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
+    MHD_destroy_response(response);
+    return ret;
 }
 
 static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
@@ -227,17 +255,17 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
     struct MHD_Response *response;
     enum MHD_Result ret;
 
-    if (strcmp(RESOURCE_LOCATION, url) != 0) { // 404 if incorrect resource is requested.
-        response = MHD_create_response_from_buffer_static(strlen(NOT_FOUND_RESPONSE), NOT_FOUND_RESPONSE);
+    if (strcmp(JSON_RESOURCE_LOCATION, url) != 0) { // 404 if incorrect resource is requested.
+        response = MHD_create_response_from_buffer_static(strlen(JSON_NOT_FOUND_RESPONSE), JSON_NOT_FOUND_RESPONSE);
         MHD_add_response_header(response, "Content-Type", "application/json");
         ret = MHD_queue_response(conn, MHD_HTTP_NOT_FOUND, response);
         MHD_destroy_response(response);
         return ret;
     }
 
-    int auth = verifyObserver(conn);
+    int auth = verifyUser(conn, AUTH_FLAG_OBSERVER);
     if (auth < 0) {
-        response = MHD_create_response_from_buffer_static(strlen(INTERNAL_ERROR_RESPONSE), INTERNAL_ERROR_RESPONSE);
+        response = MHD_create_response_from_buffer_static(strlen(JSON_INTERNAL_ERROR_RESPONSE), JSON_INTERNAL_ERROR_RESPONSE);
         MHD_add_response_header(response, "Content-Type", "application/json");
         ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
         MHD_destroy_response(response);
