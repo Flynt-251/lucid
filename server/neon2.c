@@ -9,7 +9,7 @@
 #define SALTLEN 16
 
 char* hash(char plaintext[]) {
-	uint8_t hash[HASHLEN];
+	// uint8_t hash[HASHLEN];
 	uint8_t salt[SALTLEN];
 	char encoded[ENCODED];
 

@@ -21,6 +21,8 @@
 #define SQL_AUTH_A "SELECT pass FROM "
 #define SQL_AUTH_B " WHERE email = ?"
 #define SQL_SELECT_QUERY "SELECT * FROM clientlist"
+#define MANAGEMENT_RESOURCE_LOCATION "/lucid-management"
+#define MANAGEMENT_INTERNAL_ERROR_RESPONSE "<!DOCTYPE html><head>Lucid - 500</head><body><h1>500 - Internal Server Error</h1></body>"
 #define SERVERKEYFILE "server.key"
 #define SERVERCERTFILE "server.pem"
 
@@ -157,7 +159,6 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
     // printf("Attempting to copy login data...\n");
     // strcpy(username, auth_info->username);
     // strcpy(password, auth_info->password);
-    printf("Data copied.\n");
     
     MYSQL *sql = mysql_init(NULL);
     if (sql == NULL) {
@@ -255,7 +256,8 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
     struct MHD_Response *response;
     enum MHD_Result ret;
 
-    if (strcmp(JSON_RESOURCE_LOCATION, url) != 0) { // 404 if incorrect resource is requested.
+    if ((strcmp(JSON_RESOURCE_LOCATION, url) != 0)
+     && (strcmp(MANAGEMENT_RESOURCE_LOCATION, url) != 0)) { // 404 if incorrect resource is requested.
         response = MHD_create_response_from_buffer_static(strlen(JSON_NOT_FOUND_RESPONSE), JSON_NOT_FOUND_RESPONSE);
         MHD_add_response_header(response, "Content-Type", "application/json");
         ret = MHD_queue_response(conn, MHD_HTTP_NOT_FOUND, response);
@@ -263,10 +265,37 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
         return ret;
     }
 
-    int auth = verifyUser(conn, AUTH_FLAG_OBSERVER);
-    if (auth < 0) {
-        response = MHD_create_response_from_buffer_static(strlen(JSON_INTERNAL_ERROR_RESPONSE), JSON_INTERNAL_ERROR_RESPONSE);
+    if (strcmp(JSON_RESOURCE_LOCATION, url) == 0) {
+        int auth = verifyUser(conn, AUTH_FLAG_OBSERVER);
+        if (auth < 0) {
+            response = MHD_create_response_from_buffer_static(strlen(JSON_INTERNAL_ERROR_RESPONSE), JSON_INTERNAL_ERROR_RESPONSE);
+            MHD_add_response_header(response, "Content-Type", "application/json");
+            ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
+            MHD_destroy_response(response);
+            return ret;
+        }
+        if (auth == 0) {
+            response = MHD_create_response_empty(MHD_RF_NONE);
+            if (!response)
+                return MHD_NO;
+            ret = MHD_queue_basic_auth_required_response3(conn, REALM, MHD_YES, response);
+            MHD_destroy_response(response);
+            return ret;
+        }
+    
+        const char *clientList = getClientList();
+        response = MHD_create_response_from_buffer_static(strlen(clientList), clientList);
+        if (!response)
+            return MHD_NO;
         MHD_add_response_header(response, "Content-Type", "application/json");
+        ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
+        MHD_destroy_response(response);
+        return ret;
+    }
+
+    int auth = verifyUser(conn, AUTH_FLAG_ADMIN);
+    if (auth < 0) {
+        response = MHD_create_response_from_buffer_static(strlen(MANAGEMENT_INTERNAL_ERROR_RESPONSE), MANAGEMENT_INTERNAL_ERROR_RESPONSE);
         ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
         MHD_destroy_response(response);
         return ret;
@@ -279,15 +308,7 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
         MHD_destroy_response(response);
         return ret;
     }
-    
-    const char *clientList = getClientList();
-    response = MHD_create_response_from_buffer_static(strlen(clientList), clientList);
-    if (!response)
-        return MHD_NO;
-    MHD_add_response_header(response, "Content-Type", "application/json");
-    ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
-    MHD_destroy_response(response);
-    return ret;
+    return handleSimpleGet(conn, "management-index.html");
 }
 
 int main() {
