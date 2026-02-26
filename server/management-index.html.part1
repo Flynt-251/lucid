@@ -1,0 +1,14 @@
+<!DOCTYPE html>
+<head>
+    <title>Lucid Management Console</title>
+</head>
+<body>
+    <h1>Lucid Management Console</h1>
+    <br>
+    <table>
+        <tr>
+            <th>Hostname</th>
+            <th>Nickname</th>
+            <th>General Port</th>
+            <th>RDP Port</th>
+        </tr>

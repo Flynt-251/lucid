@@ -26,6 +26,7 @@
 #define SERVERKEYFILE "server.key"
 #define SERVERCERTFILE "server.pem"
 
+
 const unsigned int AUTH_FLAG_OBSERVER = 0;
 const unsigned int AUTH_FLAG_ADMIN = 1;
 char *login;
@@ -70,6 +71,17 @@ static char* load_file(const char *filename) {
     }
     fclose(fp);
     return buffer;
+}
+
+char* dynamicStrcat(char* str1, char* str2) {
+    int len1 = strlen(str1);
+    int len2 = strlen(str2);
+    printf("Attempting to concatenate \"%s\" (%d) and \"%s\" (%d), will be %d bytes.\n", str1, len1, str2, len2, len1+len2+1);
+    char* out = (char *) malloc(len1 + len2 + 1);
+    strcpy(stpcpy(out, str1), str2);
+    out[len1+len2] = '\0';
+    printf("Result: %s\n", out);
+    return out;
 }
 
 const char* getClientList() {
@@ -133,6 +145,61 @@ const char* getClientList() {
 
     mysql_close(con);
     return json_object_to_json_string_ext(root, 0);
+}
+
+const char* getClientTable() {
+    printf("Initialising output variable for getClientTable...\n");
+    char *out = malloc(100 * sizeof(char));
+    memset(out, '\0', 100 * sizeof(char));
+
+    MYSQL *con = mysql_init(NULL);
+    if (con == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        char errMsg[255];
+        snprintf(errMsg, sizeof(errMsg), "MySQL Failed to initialise with Error code %i", mysql_errno(con));
+        sprintf(errMsg, "Internal Server Error: %s", errMsg);
+        return dynamicStrcat(out, errMsg);
+    }
+    if (mysql_real_connect(con, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        char errMsg[255];
+        snprintf(errMsg, sizeof(errMsg), "MySQL Failed to connect to Lucid Database with Error code %i", mysql_errno(con));
+        mysql_close(con);
+        sprintf(errMsg, "Internal Server Error: %s", errMsg);
+        return dynamicStrcat(out, errMsg);
+    }
+    
+    if (mysql_query(con, SQL_SELECT_QUERY)) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        char errMsg[255];
+        snprintf(errMsg, sizeof(errMsg), "MySQL could not carry out SELECT query with Error code %i", mysql_errno(con));
+        mysql_close(con);
+        sprintf(errMsg, "Internal Server Error: %s", errMsg);
+        return dynamicStrcat(out, errMsg);
+    }
+    MYSQL_RES *res = mysql_store_result(con);
+
+    
+    MYSQL_ROW row;
+    while ( (row = mysql_fetch_row(res)) ) {
+        char *outputRow = malloc(200 * sizeof(char));
+        sprintf(outputRow,
+            "<tr>\n<td>%s</td>\n<td>%s</td>\n<td>%s</td>\n<td>%s</td>\n</tr>\n",
+            row[0], row[1], row[2], row[3]
+        );
+        out = dynamicStrcat(out, outputRow);
+        printf("Added a row to the management document.\n");
+        memset(outputRow, '\0', 200 * sizeof(char));
+    }
+    printf("Got all rows!");
+
+    if (res) {
+        mysql_free_result(res);
+        res = NULL;
+    }
+
+    mysql_close(con);
+    return out;
 }
 
 int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
@@ -243,6 +310,20 @@ static enum MHD_Result handleSimpleGet(struct MHD_Connection *conn, const char *
     return ret;
 }
 
+static enum MHD_Result getClientManagementPanel(struct MHD_Connection *conn) {
+    const char* htmlResp1 = load_file("management-index.html.part1");
+    const char* htmlResp2 = load_file("management-index.html.part2");
+    const char* table = getClientTable();
+    char* htmlResp = malloc(strlen(htmlResp1) + strlen(htmlResp2) + strlen(table) + 1);
+    printf("%s", table);
+    sprintf(htmlResp, "%s%s%s", htmlResp1, table, htmlResp2);
+    printf("%s", htmlResp);
+    struct MHD_Response *response = MHD_create_response_from_buffer_static(strlen(htmlResp), htmlResp);
+    enum MHD_Result ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
+    MHD_destroy_response(response);
+    return ret;
+}
+
 static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
  const char *url, const char *method,
  const char *version, const char *upload_data,
@@ -308,7 +389,8 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
         MHD_destroy_response(response);
         return ret;
     }
-    return handleSimpleGet(conn, "management-index.html");
+
+    return getClientManagementPanel(conn);
 }
 
 int main() {
