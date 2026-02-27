@@ -2,6 +2,7 @@ compile_flags.txt
 *.out
 lucid-server
 observer
+editor
 neon2
 server.key
 server.pem
