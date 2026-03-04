@@ -2,7 +2,6 @@
 #include <sys/types.h>
 #include <sys/select.h>
 #include <mysql.h>
-#include <time.h>
 #include <iso646.h>
 #include <string.h>
 #include <stdio.h>
