@@ -10,6 +10,6 @@ lucid-server: lucid-server.c
 	$(CC) $(CFLAGS) neon2.c -largon2 -c -o neon2
 	$(CC) $(CFLAGS) $(TARGET).c -o $(TARGET) $(LFLAGS)
 
-manager: server-editor.c
+client-manager: client-manager.c
 	$(CC) $(CFLAGS) neon2.c -largon2 -c -o neon2
-	$(CC) $(CFLAGS) server-editor.c -o editor $(LFLAGS)
+	$(CC) $(CFLAGS) client-manager.c -o manager $(LFLAGS)
