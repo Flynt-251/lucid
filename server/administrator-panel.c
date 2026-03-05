@@ -16,9 +16,9 @@
 #define SQL_SELECT_ALL_ADMIN_QUERY "SELECT email, root FROM administrators"
 #define SQL_INSERT_OBS_QUERY "INSERT INTO observers(email, pass) VALUES (?, ?)"
 #define SQL_INSERT_ADMIN_QUERY "INSERT INTO administrators(email, pass) VALUES (?, ?)"
-#define SQL_DELETE_OBS_QUERY "DELETE FROM observer WHERE email = ?"
+#define SQL_DELETE_OBS_QUERY "DELETE FROM observers WHERE email = ?"
 #define SQL_DELETE_ADMIN_QUERY "DELETE FROM administrators WHERE email = ?"
-#define SQL_PASSWD_RESET_OBS "UPDATE observer SET pass = ? WHERE email = ?"
+#define SQL_PASSWD_RESET_OBS "UPDATE observers SET pass = ? WHERE email = ?"
 #define SQL_ROOT_ENABLE "UPDATE administrators SET root = TRUE WHERE email = ?"
 #define SQL_ROOT_DISABLE "UPDATE administrators SET root = FALSE WHERE email = ?"
 #define SQL_PASSWD_CHANGE "UPDATE administrators SET pass = ? WHERE email= ?"
@@ -45,6 +45,12 @@ static const char *HELP_STRING_LIMITED = "List of commands for Lucid Administrat
 "rm obs [email]    - Delete the provided observer account\n"
 "reset obs [email] - Initiate password reset for the provided observer account\n"
 "passwd            - Change this administrator account's password\n";
+
+// Modification to ensure all strings are correctly terminated
+void strNcpy(char* dest, const char* src, size_t limit) {
+    strncpy(dest, src, limit);
+    dest[strlen(src)] = '\0';
+}
 
 int verifyUser(const char* username, const char* password) {
     char *sqlAuthCheck = malloc(strlen(SQL_AUTH) + 1);
@@ -88,7 +94,7 @@ int verifyUser(const char* username, const char* password) {
         return -7;
     }
     
-    strncpy(sqlUsername, username, 254);
+    strNcpy(sqlUsername, username, 254);
     usernameLength = strlen(sqlUsername);
     
     if (mysql_stmt_execute(stmt)) {
@@ -134,12 +140,17 @@ int verifyUser(const char* username, const char* password) {
     return rootFlag;
 }
 
-void randomStr(char* dest, size_t length) {
-    char chars[] = "1234567890";
-    for (int i=0; i<length; i++) {
-        dest[i] = chars[(size_t) rand() / RAND_MAX * (sizeof(chars) - 1)];
+// Sourced from https://stackoverflow.com/a/15768317
+void randomStr(char *dest, size_t length) {
+    char charset[] = "0123456789"
+                     "abcdefghijklmnopqrstuvwxyz"
+                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    while (length-- > 0) {
+        size_t index = (double) rand() / RAND_MAX * (sizeof charset - 1);
+        *dest++ = charset[index];
     }
-    dest[length] = '\0';
+    *dest = '\0';
 }
 
 int printObserverList() {
@@ -280,8 +291,10 @@ int newObserver(const char* email) {
         return -5;
     }
 
-    strncpy(sqlEmail, email, strlen(email));
+    strNcpy(sqlEmail, email, strlen(email));
+
     emailLen = strlen(sqlEmail);
+    printf("%lu %lu %d\n", strlen(email), strlen(sqlEmail), (int)(strlen(sqlEmail) - strlen(email)));
     char passwd[17];
     randomStr(passwd, 16);
     printf("The password for this account is %s. This will not be shown again.\n", passwd);
@@ -349,7 +362,7 @@ int newAdministrator(const char* email) {
         return -5;
     }
 
-    strncpy(sqlEmail, email, strlen(email));
+    strNcpy(sqlEmail, email, strlen(email));
     emailLen = strlen(sqlEmail);
     char passwd[17];
     randomStr(passwd, 16);
@@ -411,7 +424,7 @@ int deleteObserver(const char* email) {
         return -5;
     }
 
-    strncpy(sqlEmail, email, 253);
+    strNcpy(sqlEmail, email, 253);
     emailLen = strlen(sqlEmail);
 
     if (mysql_stmt_execute(stmt)) {
@@ -420,6 +433,335 @@ int deleteObserver(const char* email) {
         return -6;
     }
     printf("Affected rows: %llu\n", mysql_affected_rows(con));
+
+    mysql_close(con);
+    return 0;
+}
+
+int deleteAdministrator(const char* email) {
+    if (0 == strcmp("root@lucid.lucid", email)) {
+        printf("Cannot delete root account.\n");
+        return -10;
+    }
+
+    MYSQL *con = mysql_init(NULL);
+
+    if (con == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        return -1;
+    }
+
+    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+            "lucid", 1, NULL, 0) == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        mysql_close(con);
+        return -2;
+    }  
+
+    MYSQL_STMT *stmt = mysql_stmt_init(con);
+    if (!stmt) {
+        fprintf(stderr, " mysql_stmt_init(), out of memory\n");
+        return -3;
+    }
+    if (mysql_stmt_prepare(stmt, SQL_DELETE_ADMIN_QUERY, strlen(SQL_DELETE_ADMIN_QUERY))) {
+        fprintf(stderr, " mysql_stmt_prepare(), INSERT failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -4;
+    }
+
+    char sqlEmail[253];
+    unsigned long emailLen;
+    MYSQL_BIND bind[1];
+    memset(bind, 1, sizeof(bind));
+
+    bind[0].buffer_type= MYSQL_TYPE_STRING;
+    bind[0].buffer= (char *) sqlEmail;
+    bind[0].buffer_length = 254;
+    bind[0].is_null= 0;
+    bind[0].length= &emailLen;
+
+    if (mysql_stmt_bind_param(stmt, bind))
+    {
+        fprintf(stderr, " mysql_stmt_bind_param() failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -5;
+    }
+
+    strNcpy(sqlEmail, email, 253);
+    emailLen = strlen(sqlEmail);
+
+    if (mysql_stmt_execute(stmt)) {
+        fprintf(stderr, " mysql_stmt_execute(), 1 failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -6;
+    }
+    printf("Affected rows: %llu\n", mysql_affected_rows(con));
+
+    mysql_close(con);
+    return 0;
+}
+
+int resetObserverPassword(const char* email) {
+    MYSQL *con = mysql_init(NULL);
+
+    if (con == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        return -1;
+    }
+
+    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+            "lucid", 1, NULL, 0) == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        mysql_close(con);
+        return -2;
+    }  
+
+    MYSQL_STMT *stmt = mysql_stmt_init(con);
+    if (!stmt) {
+        fprintf(stderr, " mysql_stmt_init(), out of memory\n");
+        return -3;
+    }
+    if (mysql_stmt_prepare(stmt, SQL_PASSWD_RESET_OBS, strlen(SQL_PASSWD_RESET_OBS))) {
+        fprintf(stderr, " mysql_stmt_prepare(), INSERT failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -4;
+    }
+
+    char passHash[253];
+    unsigned long passHashLength;
+    char sqlEmail[253];
+    unsigned long emailLen;
+    MYSQL_BIND bind[2];
+    memset(bind, 1, sizeof(bind));
+
+    bind[0].buffer_type= MYSQL_TYPE_STRING;
+    bind[0].buffer= (char *) passHash;
+    bind[0].buffer_length = 254;
+    bind[0].is_null= 0;
+    bind[0].length= &passHashLength;
+
+    bind[1].buffer_type= MYSQL_TYPE_STRING;
+    bind[1].buffer= (char *) sqlEmail;
+    bind[1].buffer_length = 254;
+    bind[1].is_null= 0;
+    bind[1].length= &emailLen;
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        fprintf(stderr, " mysql_stmt_bind_param() failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -5;
+    }
+
+    strNcpy(sqlEmail, email, strlen(email));
+    emailLen = strlen(sqlEmail);
+    char passwd[17];
+    randomStr(passwd, 16);
+    printf("The new password for this account is %s. This will not be shown again.\n", passwd);
+    strcpy(passHash, hash(passwd));
+    passHashLength = strlen(passHash);
+
+    if (mysql_stmt_execute(stmt)) {
+        fprintf(stderr, " mysql_stmt_execute(), 1 failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -6;
+    }
+
+    mysql_close(con);
+    return 0;
+}
+
+int changeAdminPassword(const char* email, char* passwd) {
+    MYSQL *con = mysql_init(NULL);
+
+    if (con == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        return -1;
+    }
+
+    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+            "lucid", 1, NULL, 0) == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        mysql_close(con);
+        return -2;
+    }  
+
+    MYSQL_STMT *stmt = mysql_stmt_init(con);
+    if (!stmt) {
+        fprintf(stderr, " mysql_stmt_init(), out of memory\n");
+        return -3;
+    }
+    if (mysql_stmt_prepare(stmt, SQL_PASSWD_CHANGE, strlen(SQL_PASSWD_CHANGE))) {
+        fprintf(stderr, " mysql_stmt_prepare(), INSERT failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -4;
+    }
+
+    char passHash[253];
+    unsigned long passHashLength;
+    char sqlEmail[253];
+    unsigned long emailLen;
+    MYSQL_BIND bind[2];
+    memset(bind, 1, sizeof(bind));
+
+    bind[0].buffer_type= MYSQL_TYPE_STRING;
+    bind[0].buffer= (char *) passHash;
+    bind[0].buffer_length = 254;
+    bind[0].is_null= 0;
+    bind[0].length= &passHashLength;
+
+    bind[1].buffer_type= MYSQL_TYPE_STRING;
+    bind[1].buffer= (char *) sqlEmail;
+    bind[1].buffer_length = 254;
+    bind[1].is_null= 0;
+    bind[1].length= &emailLen;
+
+    if (mysql_stmt_bind_param(stmt, bind)) {
+        fprintf(stderr, " mysql_stmt_bind_param() failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -5;
+    }
+
+    strNcpy(sqlEmail, email, strlen(email));
+    emailLen = strlen(sqlEmail);
+    strcpy(passHash, hash(passwd));
+    passHashLength = strlen(passHash);
+
+    if (mysql_stmt_execute(stmt)) {
+        fprintf(stderr, " mysql_stmt_execute(), 1 failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -6;
+    }
+
+    mysql_close(con);
+    return 0;
+}
+
+int enableRootPriv(const char* email) {
+    MYSQL *con = mysql_init(NULL);
+
+    if (con == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        return -1;
+    }
+
+    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+            "lucid", 1, NULL, 0) == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        mysql_close(con);
+        return -2;
+    }  
+
+    MYSQL_STMT *stmt = mysql_stmt_init(con);
+    if (!stmt) {
+        fprintf(stderr, " mysql_stmt_init(), out of memory\n");
+        return -3;
+    }
+    if (mysql_stmt_prepare(stmt, SQL_ROOT_ENABLE, strlen(SQL_ROOT_ENABLE))) {
+        fprintf(stderr, " mysql_stmt_prepare(), INSERT failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -4;
+    }
+
+    char sqlEmail[253];
+    unsigned long emailLen;
+    MYSQL_BIND bind[1];
+    memset(bind, 1, sizeof(bind));
+
+    bind[0].buffer_type= MYSQL_TYPE_STRING;
+    bind[0].buffer= (char *) sqlEmail;
+    bind[0].buffer_length = 254;
+    bind[0].is_null= 0;
+    bind[0].length= &emailLen;
+
+    if (mysql_stmt_bind_param(stmt, bind))
+    {
+        fprintf(stderr, " mysql_stmt_bind_param() failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -5;
+    }
+
+    strNcpy(sqlEmail, email, 253);
+    emailLen = strlen(sqlEmail);
+
+    if (mysql_stmt_execute(stmt)) {
+        fprintf(stderr, " mysql_stmt_execute(), 1 failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -6;
+    }
+
+    int delta = mysql_affected_rows(con);
+    if (delta == 0)
+        printf("Root privileges are already enabled for this account.\n");
+    else
+        printf("Root privileges have been enabled.\n");
+
+    mysql_close(con);
+    return 0;
+}
+
+int disableRootPriv(const char* email) {
+    if (0 == strcmp("root@lucid.lucid", email)) {
+        printf("Root privileges cannot be disabled for the root account.\n");
+        return -10;
+    }
+
+    MYSQL *con = mysql_init(NULL);
+
+    if (con == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        return -1;
+    }
+
+    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+            "lucid", 1, NULL, 0) == NULL) {
+        fprintf(stderr, "%s\n", mysql_error(con));
+        mysql_close(con);
+        return -2;
+    }  
+
+    MYSQL_STMT *stmt = mysql_stmt_init(con);
+    if (!stmt) {
+        fprintf(stderr, " mysql_stmt_init(), out of memory\n");
+        return -3;
+    }
+    if (mysql_stmt_prepare(stmt, SQL_ROOT_DISABLE, strlen(SQL_ROOT_DISABLE))) {
+        fprintf(stderr, " mysql_stmt_prepare(), INSERT failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -4;
+    }
+
+    char sqlEmail[253];
+    unsigned long emailLen;
+    MYSQL_BIND bind[1];
+    memset(bind, 1, sizeof(bind));
+
+    bind[0].buffer_type= MYSQL_TYPE_STRING;
+    bind[0].buffer= (char *) sqlEmail;
+    bind[0].buffer_length = 254;
+    bind[0].is_null= 0;
+    bind[0].length= &emailLen;
+
+    if (mysql_stmt_bind_param(stmt, bind))
+    {
+        fprintf(stderr, " mysql_stmt_bind_param() failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -5;
+    }
+
+    strNcpy(sqlEmail, email, 253);
+    emailLen = strlen(sqlEmail);
+
+    if (mysql_stmt_execute(stmt)) {
+        fprintf(stderr, " mysql_stmt_execute(), 1 failed\n");
+        fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
+        return -6;
+    }
+
+    int delta = mysql_affected_rows(con);
+    if (delta == 0)
+        printf("Root privileges are already disabled for this account.\n");
+    else
+        printf("Root privileges have been diabled.\n");
 
     mysql_close(con);
     return 0;
@@ -453,7 +795,7 @@ int main() {
     char cur[355];
     char param[255];
     while (0 != strcmp("exit", cur)) {
-        auth == 1 ? printf("lucid-panel*> ") : printf("lucid-panel>");
+        auth == 1 ? printf("lucid-panel*> ") : printf("lucid-panel> ");
         fgets(cur, sizeof(cur), stdin);
         cur[strcspn(cur, "\n")] = 0;
 
@@ -471,37 +813,81 @@ int main() {
                 printf("Permission Denied.\n");
             }
         } else if (0 == strncmp("newobs ", cur, 7)) { // Create a new observer with the given email
-            printf("Not implemented!\n");
+            strcpy(param, cur+7);
+            if (strlen(param) == 0) continue;
+            if (newObserver(param) == 0)
+                printf("New observer account created for %s\n", param);
+            else
+                printf("Failed to create observer account\n");
         } else if (0 == strncmp("newadmin ", cur, 9)) { // Create a new admin with the given email (root only)
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
             }
-            printf("Not implemented!\n");
+            strcpy(param, cur+9);
+            if (strlen(param) == 0) continue;
+            if (newAdministrator(param) == 0)
+                printf("New administrator account created for %s\n", param);
+            else
+                printf("Failed to create administrator account\n");
         } else if (0 == strncmp("rm obs ", cur, 7)) { // Remove an observer
-            printf("Not implemented!");
+            strcpy(param, cur+7);
+            if (deleteObserver(param) == 0)
+                printf("Observer account deleted.\n");
+            else
+                printf("Failed to delete observer account.\n");
         } else if (0 == strncmp("rm admin ", cur, 9)) { // Remove an admin (root only)
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
             }
-            printf("Not implemented!\n");
+            strcpy(param, cur+9);
+            if (deleteAdministrator(param) == 0)
+                printf("Administrator account deleted.\n");
+            else
+                printf("Failed to delete administrator account.\n");
         } else if (0 == strncmp("reset ", cur, 6)) { // Reset an observer's password
-            printf("Not implemented!\n");
+            strcpy(param, cur+6);
+            if (resetObserverPassword(param) == 0)
+                printf("Password reset successful\n");
+            else
+                printf("Failed to reset password\n");
         } else if (0 == strncmp("mkroot ", cur, 7)) { // Give an administrator root privileges (root only)
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
             }
-            printf("Not implemented!\n");
+            strcpy(param, cur+7);
+            if (enableRootPriv(param) == 0)
+                printf("Root privileges enabled.\n");
+            else
+                printf("Could not enable root privileges for this account.\n");
         } else if (0 == strncmp("rmroot ", cur, 7)) { // Revoke an administrator's root privileges (root only)
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
             }
-            printf("Not implemented!\n");
+            strcpy(param, cur+7);
+            if (disableRootPriv(param) == 0)
+                printf("Root privileges disabled.\n");
+            else
+                printf("Could not disable root privileges for this account.\n");
         } else if (0 == strcmp("passwd", cur)) { // Change own password
-            printf("Not implemented!\n");
+            printf("Enter new password: ");
+            fgets(cur, sizeof(cur), stdin);
+            cur[strcspn(cur, "\n")] = 0;
+            strcpy(param, cur);
+            printf("Enter password again: ");
+            fgets(cur, sizeof(cur), stdin);
+            cur[strcspn(cur, "\n")] = 0;
+            if (0 != strcmp(param, cur)) {
+                printf("Passwords do not match, please try again.\n");
+                continue;
+            }
+            if (changeAdminPassword(email, param) == 0)
+                printf("Password updated successfully.\n");
+            else
+                printf("Unable to change password.\n");
         }
     }
     printf("Goodbye.\n");

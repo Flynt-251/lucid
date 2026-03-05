@@ -2,7 +2,9 @@ compile_flags.txt
 *.out
 lucid-server
 observer
+client-manager
 editor
+administrator-panel
 neon2
 server.key
 server.pem
