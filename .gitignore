@@ -1,7 +1,7 @@
 compile_flags.txt
 *.out
 lucid-server
-observer
+observer/observer
 client-manager
 editor
 administrator-panel

@@ -7,6 +7,7 @@
 #include <curl/curl.h>
 
 #define USER_AGENT "libcurl-agent/1.0"
+#define FREERDP_COMMAND "sdl-freerdp /u:lucid /p:lucid /v:%s /port:%d /size:1920x1080"
 
 struct LucidClient {
     char hostname[255];
@@ -88,6 +89,12 @@ void getClientList(char *dest) {
     curl_global_cleanup();
 }
 
+void connectRDP(struct LucidClient client) {
+    char command[321];
+    sprintf(command, FREERDP_COMMAND, client.hostname, client.rdpPort);
+    system(command);
+}
+
 int main() {
     char JSON[4096];
     struct LucidClient Conns[256];
@@ -113,7 +120,7 @@ int main() {
         printf("%s (%s) SSH: %d, RDP: %d\n", Conns[i].hostname, Conns[i].nickname, Conns[i].sshPort, Conns[i].rdpPort);
     }
 
-    
+    connectRDP(Conns[0]);
 
     return 0;
 }
