@@ -1,7 +1,5 @@
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include <iostream>
-#include <fstream>    // File Handling
-#include <filesystem> // For checking if a file exists
 #include <string>
 #include <vector>
 #include <unistd.h>

@@ -1,10 +1,10 @@
-CC = clang++
+CC = clang
 
-CFLAGS = -g -Wall -std=c++17
+CFLAGS = -g -Wall
 
-LFLAGS = -L/usr/lib64 -L/usr/local/lib -lsfml-network -lsfml-system -ljson-c -lssl -lcrypto
+LFLAGS = -L/usr/lib64 -L/usr/local/lib -ljson-c -lcurl
 
 TARGET = observer
 
-observer: observer.cpp
-	$(CC) $(CFLAGS) $(TARGET).cpp -o $(TARGET) $(LFLAGS)
+observer: observer.c
+	$(CC) $(CFLAGS) $(TARGET).c -o $(TARGET) $(LFLAGS)
