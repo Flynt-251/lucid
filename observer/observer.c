@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <json-c/json.h>
 #include <json-c/json_object.h>
 #include <termios.h>
@@ -92,13 +93,17 @@ void getClientList(char *dest) {
 void connectRDP(struct LucidClient client) {
     char command[321];
     sprintf(command, FREERDP_COMMAND, client.hostname, client.rdpPort);
+    printf("%s\n", command);
     system(command);
 }
 
 int main() {
     char JSON[4096];
+    char cur[100];
     struct LucidClient Conns[256];
     int numConns = 0;
+    int validSel;
+    int selection = 257;
 
     getClientList(JSON);
     json_object *root = json_tokener_parse(JSON);
@@ -117,10 +122,22 @@ int main() {
         numConns++;
     }
     for (int i=0; i<numConns; i++) {
-        printf("%s (%s) SSH: %d, RDP: %d\n", Conns[i].hostname, Conns[i].nickname, Conns[i].sshPort, Conns[i].rdpPort);
+        printf("%d: %s (%s) SSH: %d, RDP: %d\n", i, Conns[i].hostname, Conns[i].nickname, Conns[i].sshPort, Conns[i].rdpPort);
     }
 
-    connectRDP(Conns[0]);
+    while (selection >= numConns) {
+        printf("Enter a client to connect to: ");
+        fgets(cur, sizeof(cur), stdin);
+        if (0 == strcmp("\n", cur)) continue;
+        cur[strcspn(cur, "\n")] = 0;
+        validSel = 1;
+        for (int i=0; i<strlen(cur); i++)
+            if (!isdigit(cur[i])) validSel = 0;
+        if (!validSel) continue;
+        selection = atoi(cur);
+    }
+
+    connectRDP(Conns[selection]);
 
     return 0;
 }
