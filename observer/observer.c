@@ -2,13 +2,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <time.h>
 #include <json-c/json.h>
 #include <json-c/json_object.h>
 #include <termios.h>
 #include <curl/curl.h>
+#include <libssh/libssh.h>
 
 #define USER_AGENT "libcurl-agent/1.0"
-#define FREERDP_COMMAND "sdl-freerdp /u:lucid /p:lucid /v:%s /port:%d /size:1920x1080"
+#define MACRO_SHUTDOWN "sudo shutdown now"
+#define MACRO_RESTART "sudo shutdown -r now"
+#define MACRO_LOGOUT "qdbus org.kde.Shutdown /Shutdown logout"
+
 
 struct LucidClient {
     char hostname[255];
@@ -38,6 +45,58 @@ size_t writeMem(void *contents, size_t size, size_t nmemb, void *userp) {
     mem->mem[mem->size] = 0;
 
     return fullSize;
+}
+
+int verifyKnownHost(ssh_session ssh) {
+    enum ssh_known_hosts_e state;
+    unsigned char *hash = NULL;
+    ssh_key serverPublicKey = NULL;
+    size_t hlen;
+    char buf[10];
+    char *p = NULL;
+    int cmp;
+    int rc;
+
+    rc = ssh_get_server_publickey(ssh, &serverPublicKey);
+    if (rc < 0)
+        return -1;
+
+    rc = ssh_get_publickey_hash(serverPublicKey, SSH_PUBLICKEY_HASH_SHA256, &hash, &hlen);
+    ssh_key_free(serverPublicKey);
+    if (rc < 0)
+        return -1;
+
+    state = ssh_session_is_known_server(ssh);
+    switch (state) {
+        case SSH_KNOWN_HOSTS_OK:
+            break;
+
+        case SSH_KNOWN_HOSTS_CHANGED:
+            fprintf(stderr, "Host key has changed to:\n");
+            ssh_print_hash(SSH_PUBLICKEY_HASH_SHA256, hash, hlen);
+            fprintf(stderr, "Connection stopped.\n");
+            ssh_clean_pubkey_hash(&hash);
+            return -1;
+        
+        case SSH_KNOWN_HOSTS_NOT_FOUND:
+            fprintf(stderr, "Couldn't find a known host file.\nContinue to automatically create it.\n");
+
+        case SSH_KNOWN_HOSTS_UNKNOWN:
+            fprintf(stderr, "This is an unknown server. Do you wish to accept the host key?");
+            ssh_print_hash(SSH_PUBLICKEY_HASH_SHA256, hash, hlen);
+            ssh_clean_pubkey_hash(&hash);
+            p = fgets(buf, sizeof(buf), stdin);
+            if (p == NULL) {
+                return -1;
+            }
+            cmp = strncasecmp(buf, "yes", 3);
+            if (cmp != 0) {
+                return -1;
+            }
+            break;
+    }
+    ssh_clean_pubkey_hash(&hash);
+    return 0;
 }
 
 void getClientList(char *dest) {
@@ -90,11 +149,100 @@ void getClientList(char *dest) {
     curl_global_cleanup();
 }
 
+int sshPerformCommand(ssh_session session, const char *command) {
+    ssh_channel channel = NULL;
+    int rc;
+    char buffer[256];
+    int nbytes;
+    
+    channel = ssh_channel_new(session);
+    if (channel == NULL)
+        return SSH_ERROR;
+    
+    rc = ssh_channel_open_session(channel);
+    if (rc != SSH_OK) {
+        ssh_channel_free(channel);
+        return rc;
+    }
+    
+    rc = ssh_channel_request_exec(channel, command);
+    if (rc != SSH_OK) {
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+        return rc;
+    }
+    
+    nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
+    while (nbytes > 0) {
+        if (write(1, buffer, nbytes) != (unsigned int) nbytes) {
+            ssh_channel_close(channel);
+            ssh_channel_free(channel);
+            return SSH_ERROR;
+        }
+        nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
+    }
+    buffer[nbytes] = '\0';
+    printf("%s\n", buffer);
+    
+    if (nbytes < 0) {
+        ssh_channel_close(channel);
+        ssh_channel_free(channel);
+        return SSH_ERROR;
+    }
+    
+    ssh_channel_send_eof(channel);
+    ssh_channel_close(channel);
+    ssh_channel_free(channel);
+    
+    return SSH_OK;
+}
+
+void connectSSH(struct LucidClient client, const char *command) {
+    ssh_session ssh = NULL;
+    int rc;
+
+    ssh = ssh_new();
+    if (ssh == NULL)
+        exit(-1);
+
+    ssh_options_set(ssh, SSH_OPTIONS_HOST, client.hostname);
+    ssh_options_set(ssh, SSH_OPTIONS_PORT, &client.sshPort);
+
+    rc = ssh_connect(ssh);
+    if (rc != SSH_OK) {
+        fprintf(stderr, "Error connecting to SSH server: %s\n", ssh_get_error(ssh));
+        return;
+    }
+
+    if (verifyKnownHost(ssh) < 0) {
+        ssh_disconnect(ssh);
+        ssh_free(ssh);
+        return;
+    }
+
+    rc = ssh_userauth_password(ssh, "lucid", "lucid");
+    if (rc != SSH_AUTH_SUCCESS) {
+        fprintf(stderr, "Authentication Failure: %s\n", ssh_get_error(ssh));
+        ssh_disconnect(ssh);
+        ssh_free(ssh);
+        return;
+    }
+
+    sshPerformCommand(ssh, command);
+
+    ssh_disconnect(ssh);
+    ssh_free(ssh);
+}
+
 void connectRDP(struct LucidClient client) {
-    char command[321];
-    sprintf(command, FREERDP_COMMAND, client.hostname, client.rdpPort);
-    printf("%s\n", command);
-    system(command);
+    char host[259];
+    char port[12];
+    
+    sprintf(host, "/v:%s", client.hostname);
+    sprintf(port, "/port:%d", client.rdpPort);
+    execlp("/usr/bin/sdl-freerdp", "sdl-freerdp", "/u:lucid", "/p:lucid", host, port, "/size:1920x1080", NULL);
+    perror("Could not start sdl-freerdp.\n");
+    return;
 }
 
 int main() {
@@ -104,6 +252,10 @@ int main() {
     int numConns = 0;
     int validSel;
     int selection = 257;
+    int pid;
+    char logName[42];
+    int log;
+    int sshCmd;
 
     getClientList(JSON);
     json_object *root = json_tokener_parse(JSON);
@@ -125,19 +277,83 @@ int main() {
         printf("%d: %s (%s) SSH: %d, RDP: %d\n", i, Conns[i].hostname, Conns[i].nickname, Conns[i].sshPort, Conns[i].rdpPort);
     }
 
-    while (selection >= numConns) {
-        printf("Enter a client to connect to: ");
-        fgets(cur, sizeof(cur), stdin);
-        if (0 == strcmp("\n", cur)) continue;
-        cur[strcspn(cur, "\n")] = 0;
-        validSel = 1;
-        for (int i=0; i<strlen(cur); i++)
-            if (!isdigit(cur[i])) validSel = 0;
-        if (!validSel) continue;
-        selection = atoi(cur);
-    }
+    while (1) {
+        selection = 257;
+        while (selection >= numConns) {
+            printf("Enter a client to connect to: ");
+            fgets(cur, sizeof(cur), stdin);
+            if (0 == strcmp("\n", cur)) continue;
+            cur[strcspn(cur, "\n")] = 0;
+            if (0 == strcmp("exit", cur)) break;
+            validSel = 1;
+            for (int i=0; i<strlen(cur); i++)
+                if (!isdigit(cur[i])) validSel = 0;
+            if (!validSel) continue;
+            selection = atoi(cur);
+        }
 
-    connectRDP(Conns[selection]);
+        if (selection >= numConns) {
+            printf("Goodbye.\n");
+            break;
+        }
+    
+        while (0 != strcmp("rdp", cur) && 0 != strcmp("ssh", cur)) {
+            printf("Connect via (rdp) or (ssh)? ");
+            fgets(cur, sizeof(cur), stdin);
+            cur[strcspn(cur, "\n")] = 0;
+        }
+
+        if (0 == strcmp("rdp", cur)) {
+            sprintf(logName, "sdl-freerdp-out-%lu.log", (unsigned long) time(NULL));
+            log = open(logName, O_CREAT|O_WRONLY|O_TRUNC, 0644);
+            if (!log) {
+                fprintf(stderr, "Couldn't open log file for RDP Connection.\n");
+                continue;
+            }
+            pid = fork();
+            if (pid < 0) printf("Failed to open RDP Connection.\n");
+            else if (pid == 0) {
+                dup2(log, 1);
+                close(log);
+                connectRDP(Conns[selection]);
+                return 0;
+            }    
+        } else {
+            sshCmd = 10;
+            printf("\nSSH Command options");
+            printf("1: Shutdown\n");
+            printf("2: Restart\n");
+            printf("3: Logout (KDE Session)\n");
+            while (sshCmd >= 4) {
+                printf("Select a command to send (or enter 0 followed by a custom command): ");
+                fgets(cur, sizeof(cur), stdin);
+                if (0 == strcmp("\n", cur)) continue;
+                cur[strcspn(cur, "\n")] = 0;
+                validSel = 1;
+                for (int i=0; i<strlen(cur); i++)
+                    if (!isdigit(cur[i])) validSel = 0;
+                if (!validSel) continue;
+                sshCmd = atoi(cur);
+            }
+            switch (sshCmd) {
+                case 0:
+                    printf("> ");
+                    fgets(cur, sizeof(cur), stdin);
+                    cur[strcspn(cur, "\n")] = 0;
+                    connectSSH(Conns[selection], cur);
+                    break;
+                case 1:
+                    connectSSH(Conns[selection], MACRO_SHUTDOWN);
+                    break;
+                case 2:
+                    connectSSH(Conns[selection], MACRO_RESTART);
+                    break;
+                case 3:
+                    connectSSH(Conns[selection], MACRO_LOGOUT);
+                    break;
+            }
+        }
+    }
 
     return 0;
 }
