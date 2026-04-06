@@ -15,7 +15,7 @@
 #define SQL_SELECT_EDIT_QUERY "SELECT nickname, port, rdp FROM clientlist WHERE hostname = ?"
 #define SQL_DELETE_CLIENT_QUERY "DELETE FROM clientlist WHERE hostname = ?"
 #define SQL_UPDATE_CLIENT_QUERY "UPDATE clientlist SET nickname = ?, port = ?, rdp = ? WHERE hostname = ?"
-#define SQL_INSERT_CLIENT_QUERY "INSERT INTO clientlist(hostname, nickname, port, rdp) VALUES (?, ?, ?, ?)"
+#define SQL_INSERT_CLIENT_QUERY "INSERT INTO clientlist(hostname, nickname) VALUES (?, ?)"
 // Sourced from https://stackoverflow.com/a/106223
 #define REGEX_IP "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
 #define REGEX_DNS "^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])$"
@@ -355,7 +355,7 @@ int modifyClient(const char* hostname, const char* nickname, int port, int rdp) 
     return 0;
 }
 
-int newClient(const char* hostname, const char* nickname, int port, int rdp) {
+int newClient(const char* hostname, const char* nickname) {
     MYSQL *con = mysql_init(NULL);
 
     if (con == NULL) {
@@ -385,9 +385,7 @@ int newClient(const char* hostname, const char* nickname, int port, int rdp) {
     unsigned long hostnameLen;
     char sqlNickname[253];
     unsigned long nicknameLen;
-    unsigned long portLen;
-    unsigned long rdpLen;
-    MYSQL_BIND bind[4];
+    MYSQL_BIND bind[2];
     memset(bind, 1, sizeof(bind));
 
     bind[0].buffer_type= MYSQL_TYPE_STRING;
@@ -401,16 +399,6 @@ int newClient(const char* hostname, const char* nickname, int port, int rdp) {
     bind[1].buffer_length = 254;
     bind[1].is_null= 0;
     bind[1].length= &nicknameLen;
-    
-    bind[2].buffer_type= MYSQL_TYPE_SHORT;
-    bind[2].buffer= (char *) &port;
-    bind[2].is_null= 0;
-    bind[2].length= &portLen;
-    
-    bind[3].buffer_type= MYSQL_TYPE_SHORT;
-    bind[3].buffer= (char *) &rdp;
-    bind[3].is_null= 0;
-    bind[3].length= &rdpLen;
 
     if (mysql_stmt_bind_param(stmt, bind)) {
         fprintf(stderr, " mysql_stmt_bind_param() failed\n");
@@ -593,10 +581,8 @@ int main() {
                 printf("Failed to update client.\n");
             }
         } else if (0 == strcmp("add", cur)) { // Add a client
-            char hostname[254];
+            char hostname[253];
             char nickname[32];
-            int port = -1;
-            int rdp = -1;
             regex_t hostnameComp;
             regex_t ipComp;
             if (regcomp(&hostnameComp, REGEX_DNS, 0) || regcomp(&ipComp, REGEX_IP, 0)) {
@@ -605,7 +591,7 @@ int main() {
             }
             do {
                 printf("Hostname (must be a valid domain or IPv4 address): ");
-                fgets(cur, sizeof(cur), stdin);
+                fgets(cur, 253, stdin);
                 cur[strcspn(cur, "\n")] = 0;
             } while (
                 (0 != regexec(&hostnameComp, cur, 0, NULL, 0)) &&
@@ -618,32 +604,12 @@ int main() {
                 cur[strcspn(cur, "\n")] = 0;
             } while (strlen(cur) > 32 || strlen(cur) <= 0);
             strcpy(nickname, cur);
-            do {
-                printf("Port for Lucid Control [0-35535]: ");
-                fgets(cur, sizeof(cur), stdin);
-                cur[strcspn(cur, "\n")] = 0;
-                for (int i=0; i<strlen(cur); i++) {
-                    if (!isdigit(cur[i]))
-                        continue;
-                }
-                port = atoi(cur);
-            } while (port > 65535 || port < 0);
-            do {
-                printf("Port for RDP remote access [0-35535]: ");
-                fgets(cur, sizeof(cur), stdin);
-                cur[strcspn(cur, "\n")] = 0;
-                for (int i=0; i<strlen(cur); i++) {
-                    if (!isdigit(cur[i]))
-                        continue;
-                }
-                rdp = atoi(cur);
-            } while (rdp > 65535 || rdp < 0);
-            printf("Attempting to create client %s - Alias: %s, Port: %d, RDP Port: %d\n",
-                hostname, nickname, port, rdp
+            printf("Attempting to create client %s - Alias: %s, SSH Port: 22, RDP Port: 3389\n",
+                hostname, nickname
             );
-            if (newClient(hostname, nickname, port, rdp) == 0) {
-                printf("Added client %s - Alias: %s, Port: %d, RDP Port: %d\n",
-                    hostname, nickname, port, rdp
+            if (newClient(hostname, nickname) == 0) {
+                printf("Added client %s - Alias: %s\n",
+                    hostname, nickname
                 );
             } else {
                 printf("Failed to create client.\n");
