@@ -10,6 +10,7 @@
 #include "mariadb_com.h"
 #include "neon2.h"
 
+#define NULLCLIENT &(struct lucidClient) {"","",-1,-1}
 #define SQL_AUTH "SELECT pass FROM administrators WHERE email = ?"
 #define SQL_SELECT_ALL_QUERY "SELECT * FROM clientlist"
 #define SQL_SELECT_EDIT_QUERY "SELECT nickname, port, rdp FROM clientlist WHERE hostname = ?"
@@ -29,8 +30,8 @@ static const char *HELP_STRING = "List of commands for Lucid Management Console:
 "add             - Add a new client\n";
 
 struct lucidClient {
-    const char* hostname;
-    const char* nickname;
+    char* hostname;
+    char* nickname;
     int port;
     int rdp;
 };
@@ -39,12 +40,6 @@ struct lucidClient {
 void strNcpy(char* dest, const char* src, size_t limit) {
     strncpy(dest, src, limit);
     dest[strlen(src)] = '\0';
-}
-
-void printLucidClient(const struct lucidClient* client) {
-    printf("Lucid Client: %s:%d (RDP %d), Alias %s",
-        client->hostname, client->port, client->rdp, client->nickname
-    );
 }
 
 int verifyUser(const char* username, const char* password) {
@@ -173,27 +168,32 @@ int printClientList() {
     return 0;
 }
 
-struct lucidClient* getOneClient(const char* hostname) {
+void getOneClient(const char* hostname, struct lucidClient *dest) {
     MYSQL *sql = mysql_init(NULL);
     if (sql == NULL) {
         printf("Failed to initialise MySQL connector.\n");
-        return NULL;
+        dest = NULLCLIENT;
+        return;
+
     }
     if (mysql_real_connect(sql, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
         printf("Failed to connect to MySQL database. (%s)\n", mysql_error(sql));
         mysql_close(sql);
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
     
     MYSQL_STMT *stmt = mysql_stmt_init(sql);
     if (!stmt) {
         printf("Failed to initialise SQL statement.\n");
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
     if (mysql_stmt_prepare(stmt, SQL_SELECT_EDIT_QUERY, strlen(SQL_SELECT_EDIT_QUERY))) {
         printf("Failed to Prepare SQL statement.\n");
         printf("%s\n", mysql_error(sql));
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
     
     char sqlHostname[253];
@@ -209,7 +209,8 @@ struct lucidClient* getOneClient(const char* hostname) {
     
     if (mysql_stmt_bind_param(stmt, bind)) {
         printf("Failed to bind parameter(s) SQL statement.\n");
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
     
     strncpy(sqlHostname, hostname, 253);
@@ -217,15 +218,16 @@ struct lucidClient* getOneClient(const char* hostname) {
     
     if (mysql_stmt_execute(stmt)) {
         printf("Failed to bind execute SQL statement.\n");
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
     
     MYSQL_BIND resultBind[3];
-    char nickname[253];
+    char nickname[253] = "";
     unsigned long nicknameLength;
-    int port;
+    int port = -1;
     unsigned long portLength;
-    int rdpPort;
+    int rdpPort = -1;
     unsigned long rdpLength;
     memset(resultBind, 0, sizeof(resultBind));
 
@@ -247,27 +249,30 @@ struct lucidClient* getOneClient(const char* hostname) {
 
     if (mysql_stmt_bind_result(stmt, resultBind)) {
         printf("Failed to bind results table.\n\t%s\n", mysql_stmt_error(stmt));
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
     if (mysql_stmt_store_result(stmt)) {
         printf("Failed to store results table.\n\t%s\n", mysql_stmt_error(stmt));
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
     if (mysql_stmt_fetch(stmt) == MYSQL_NO_DATA) {
         printf("No results for this hostname.\n");
         printf("%s\n", nickname);
-        return NULL;
+        dest = NULLCLIENT;
+        return;
     }
 
-    struct lucidClient* out = &(struct lucidClient) {
-        .hostname = hostname,
-        .nickname = nickname,
-        .port = port,
-        .rdp = rdpPort
-    };
+    dest->hostname = malloc(strlen(hostname) + 1);
+    strNcpy(dest->hostname, hostname, strlen(hostname));
+    dest->nickname = malloc(strlen(nickname) + 1);
+    strNcpy(dest->nickname, nickname, strlen(nickname));
+    dest->port = (short int) port;
+    dest->rdp = (short int) rdpPort;
+    printf("Got client. (%d)\n", dest->port);
 
     mysql_close(sql);
-    return out;
 }
 
 int modifyClient(const char* hostname, const char* nickname, int port, int rdp) {
@@ -499,9 +504,9 @@ int main() {
     }
     
     printf("\nSuccessfully Logged in.\n\n");
-    char cur[355];
+    char cur[355] = "";
     char param[255];
-    struct lucidClient *client;
+    struct lucidClient client = {"", "", -1, -1};
     while (0 != strcmp("exit", cur)) {
         printf("lm> ");
         fgets(cur, sizeof(cur), stdin);
@@ -516,13 +521,13 @@ int main() {
             printClientList();
         } else if (0 == strncmp("edit ", cur, 5)) { // Edit a single client
             strcpy(param, cur+5);
-            client = getOneClient(param);
-            if (client == NULL) {
+            getOneClient(param, &client);
+            if (client.port == -1) {
                 printf("Invalid Hostname.\n");
                 continue;
             }
             printf("Found client for %s (alias \"%s\"), accessible at %d and %d over RDP.\nEditing Client...\n\n",
-                param, client->nickname, client->port, client->rdp
+                param, client.nickname, client.port, client.rdp
             );
             char newNickname[32];
             int newPort = -1;
@@ -534,7 +539,7 @@ int main() {
             } while (strlen(cur) > 32);
             if (0 == strcmp("", cur)) {
                 printf("Retaining original nickname.\n");
-                strcpy(newNickname, client->hostname);
+                strcpy(newNickname, client.hostname);
             } else {
                 strcpy(newNickname, cur);
             }
@@ -543,7 +548,7 @@ int main() {
                 fgets(cur, sizeof(cur), stdin);
                 if (0 == strcmp("\n", cur)) {
                     printf("Retaining original lucid port.\n");
-                    newPort = client->port;
+                    newPort = client.port;
                     continue;
                 }
                 cur[strcspn(cur, "\n")] = 0;
@@ -558,7 +563,7 @@ int main() {
                 fgets(cur, sizeof(cur), stdin);
                 if (0 == strcmp("\n", cur)) {
                     printf("Retaining original RDP port.\n");
-                    newRdp = client->rdp;
+                    newRdp = client.rdp;
                     continue;
                 }
                 cur[strcspn(cur, "\n")] = 0;
@@ -569,10 +574,9 @@ int main() {
                 newRdp = atoi(cur);
             } while (newRdp > 65535 || newRdp < 0);
             printf("Got: {%s, %d, %d}\nSaving new data to client buffer...\n", newNickname, newPort, newRdp);
-            client->nickname = newNickname;
-            client->port = newPort;
-            client->rdp = newRdp;
-            printLucidClient(client);
+            client.nickname = newNickname;
+            client.port = newPort;
+            client.rdp = newRdp;
             printf("Exporting changes...\n");
             if (modifyClient(param, newNickname, newPort, newRdp) == 0) {
                 printf("Updated client %s - Alias: %s, Port: %d, RDP Port: %d\n",
@@ -617,13 +621,13 @@ int main() {
             }
         } else if (0 == strncmp("rm ", cur, 3)) { // Delete a client
             strcpy(param, cur+3);
-            client = getOneClient(param);
-            if (client == NULL) {
+            getOneClient(param, &client);
+            if (client.port == -1) {
                 printf("Invalid Hostname.\n");
                 continue;
             }
             printf("Found client to remove: %s (alias \"%s\"), accessible at %d and %d over RDP.\nEditing Client...\n\n",
-                param, client->nickname, client->port, client->rdp
+                param, client.nickname, client.port, client.rdp
             );
             printf("\nThis client will be removed from the lucid system and can no longer be tracked.\n");
             do {
@@ -642,7 +646,7 @@ int main() {
             if ((0 != strcmp("y", cur)) && (0 != strcmp("Y", cur))) {
                 continue;
             }
-            if (deleteClient(client->hostname) == 0) {
+            if (deleteClient(client.hostname) == 0) {
                 printf("Client deleted.\n");
             } else {
                 printf("Failed to delete client.\n");
