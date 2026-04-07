@@ -20,13 +20,6 @@
 #define REGEX_IP "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
 #define REGEX_DNS "^(([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9\\-]*[a-zA-Z0-9])\\.)*([A-Za-z0-9]|[A-Za-z0-9][A-Za-z0-9\\-]*[A-Za-z0-9])$"
 
-static const char *MANAGEMENT_OPTIONS = "Lucid Client Management Options:\n"
-"1: View full client list\n"
-"2: Manage a client entry\n"
-"3: Add a new client\n"
-"4: Remove a client\n"
-"\n0:Finish and Sign Out\n";
-
 static const char *HELP_STRING = "List of commands for Lucid Management Console:\n"
 "exit            - Sign out of the management console\n"
 "help            - Display this help page\n"
@@ -41,6 +34,12 @@ struct lucidClient {
     int port;
     int rdp;
 };
+
+// Modification to ensure all strings are correctly terminated
+void strNcpy(char* dest, const char* src, size_t limit) {
+    strncpy(dest, src, limit);
+    dest[strlen(src)] = '\0';
+}
 
 void printLucidClient(const struct lucidClient* client) {
     printf("Lucid Client: %s:%d (RDP %d), Alias %s",
@@ -406,8 +405,10 @@ int newClient(const char* hostname, const char* nickname) {
         return -5;
     }
 
-    strncpy(sqlHostname, hostname, strlen(hostname));
-    strncpy(sqlNickname, nickname, strlen(nickname));
+    strNcpy(sqlHostname, hostname, strlen(hostname));
+    hostnameLen = strlen(sqlHostname);
+    strNcpy(sqlNickname, nickname, strlen(nickname));
+    nicknameLen = strlen(sqlNickname);
 
     if (mysql_stmt_execute(stmt)) {
         fprintf(stderr, " mysql_stmt_execute(), 1 failed\n");
@@ -591,7 +592,7 @@ int main() {
             }
             do {
                 printf("Hostname (must be a valid domain or IPv4 address): ");
-                fgets(cur, 253, stdin);
+                fgets(cur, sizeof(cur), stdin);
                 cur[strcspn(cur, "\n")] = 0;
             } while (
                 (0 != regexec(&hostnameComp, cur, 0, NULL, 0)) &&
