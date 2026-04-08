@@ -105,7 +105,7 @@ int verifyUser(const char* username, const char* password) {
     MYSQL_BIND resultBind[2];
     char passHash[254];
     unsigned long passHashLength;
-    int rootFlag;
+    int rootFlag = 0;
     unsigned long rootFlagLength;
     memset(resultBind, 0, sizeof(resultBind));
     resultBind[0].buffer_type = MYSQL_TYPE_STRING;
@@ -137,7 +137,7 @@ int verifyUser(const char* username, const char* password) {
 
     if (out == 0) return -1;
 
-    return rootFlag;
+    return (short int) rootFlag;
 }
 
 // Sourced from https://stackoverflow.com/a/15768317
@@ -768,8 +768,9 @@ int disableRootPriv(const char* email) {
 }
 
 int main() {
-    char email[254];
-    char passw[254];
+    char email[254] = "";
+    char passw[254] = "";
+    int auth = -1;
 
     printf("Email> ");
     fgets(email, sizeof(email), stdin);
@@ -778,7 +779,7 @@ int main() {
     fgets(passw, sizeof(passw), stdin);
     passw[strcspn(passw, "\n")] = 0;
     
-    int auth = verifyUser(email, passw);
+    auth = verifyUser(email, passw);
     if (auth < -2) {
         printf("Internal Server Error.\n");
         return auth;
@@ -792,8 +793,8 @@ int main() {
     printf("\n");
 
 
-    char cur[355];
-    char param[255];
+    char cur[355] = "";
+    char param[255] = "";
     while (0 != strcmp("exit", cur)) {
         auth == 1 ? printf("lucid-panel*> ") : printf("lucid-panel> ");
         fgets(cur, sizeof(cur), stdin);
