@@ -16,6 +16,7 @@
 #define MACRO_RESTART "sudo shutdown -r now"
 #define MACRO_LOGOUT "qdbus org.kde.Shutdown /Shutdown logout"
 
+int listFetched = 0;
 
 struct LucidClient {
     char hostname[255];
@@ -139,6 +140,7 @@ void getClientList(char *dest) {
         } else {
             // printf("%lu bytes retrieved.\n", (unsigned long) chunk.size);
             // printf("%s\n", chunk.mem);
+            listFetched = 1;
             strcpy(dest, chunk.mem);
         }
 
@@ -246,18 +248,19 @@ void connectRDP(struct LucidClient client) {
 }
 
 int main() {
-    char JSON[4096];
-    char cur[100];
+    char JSON[4096] = "";
+    char cur[100] = "";
     struct LucidClient Conns[256];
     int numConns = 0;
     int validSel;
     int selection = 257;
     int pid;
-    char logName[42];
+    char logName[42] = "";
     int log;
     int sshCmd;
 
     getClientList(JSON);
+    if (listFetched == 0) return -1;
     json_object *root = json_tokener_parse(JSON);
     json_object *clients = json_object_object_get(root, "clients");
     int n = json_object_array_length(clients);
