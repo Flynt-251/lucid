@@ -11,6 +11,8 @@
 #include "neon2.h"
 
 #define NULLCLIENT &(struct lucidClient) {"","",-1,-1}
+#define SQL_USER "lucid"
+#define SQL_PASS "hyperplane-kumquat-platypus"
 #define SQL_AUTH "SELECT pass FROM administrators WHERE email = ?"
 #define SQL_SELECT_ALL_QUERY "SELECT * FROM clientlist"
 #define SQL_SELECT_EDIT_QUERY "SELECT nickname, port, rdp FROM clientlist WHERE hostname = ?"
@@ -51,7 +53,7 @@ int verifyUser(const char* username, const char* password) {
         printf("Failed to initialise MySQL connector.\n");
         return -1;
     }
-    if (mysql_real_connect(sql, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(sql, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         printf("Failed to connect to MySQL database. (%s)\n", mysql_error(sql));
         mysql_close(sql);
         return -2;
@@ -130,7 +132,7 @@ int printClientList() {
         sprintf(errMsg, "Internal Server Error: %s", errMsg);
         return -1;
     }
-    if (mysql_real_connect(con, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         char errMsg[255];
         snprintf(errMsg, sizeof(errMsg), "MySQL Failed to connect to Lucid Database with Error code %i", mysql_errno(con));
@@ -176,7 +178,7 @@ void getOneClient(const char* hostname, struct lucidClient *dest) {
         return;
 
     }
-    if (mysql_real_connect(sql, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(sql, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         printf("Failed to connect to MySQL database. (%s)\n", mysql_error(sql));
         mysql_close(sql);
         dest = NULLCLIENT;
@@ -283,7 +285,7 @@ int modifyClient(const char* hostname, const char* nickname, int port, int rdp) 
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -367,7 +369,7 @@ int newClient(const char* hostname, const char* nickname) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -433,7 +435,7 @@ int deleteClient(const char* hostname) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);

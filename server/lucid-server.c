@@ -18,13 +18,17 @@
 #define JSON_RESOURCE_LOCATION "/lucid-api"
 #define JSON_NOT_FOUND_RESPONSE "{\"clients\":[],\"status\":1,\"description\":\"Invalid URL\"}"
 #define JSON_INTERNAL_ERROR_RESPONSE "{\"clients\":[],\"status\":2,\"description\":\"Internal Server Error\"}"
+#define SQL_USER "lucid"
+#define SQL_PASS "hyperplane-kumquat-platypus"
 #define SQL_AUTH_A "SELECT pass FROM "
 #define SQL_AUTH_B " WHERE email = ?"
 #define SQL_SELECT_QUERY "SELECT * FROM clientlist"
 #define MANAGEMENT_RESOURCE_LOCATION "/lucid-management"
 #define MANAGEMENT_INTERNAL_ERROR_RESPONSE "<!DOCTYPE html><head>Lucid - 500</head><body><h1>500 - Internal Server Error</h1></body>"
-#define SERVERKEYFILE "server.key"
-#define SERVERCERTFILE "server.pem"
+#define SERVERKEYFILE "/etc/lucid-server/server.key"
+#define SERVERCERTFILE "/etc/lucid-server/server.pem"
+#define MANAGEMENT_INDEX_1 "/usr/share/lucid-server/management-index.html.part1"
+#define MANAGEMENT_INDEX_2 "/usr/share/lucid-server/management-index.html.part2"
 
 
 const unsigned int AUTH_FLAG_OBSERVER = 0;
@@ -99,7 +103,7 @@ const char* getClientList() {
         json_object_object_add(root, "debug", json_object_new_string(errMsg));
         return json_object_to_json_string_ext(root, 0);
     }
-    if (mysql_real_connect(con, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         json_object_object_add(root, "status", json_object_new_int(-2));
         json_object_object_add(root, "description", json_object_new_string("Failed to fetch client list."));
@@ -160,7 +164,7 @@ const char* getClientTable() {
         sprintf(errMsg, "Internal Server Error: %s", errMsg);
         return dynamicStrcat(out, errMsg);
     }
-    if (mysql_real_connect(con, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         char errMsg[255];
         snprintf(errMsg, sizeof(errMsg), "MySQL Failed to connect to Lucid Database with Error code %i", mysql_errno(con));
@@ -232,7 +236,7 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
         printf("Failed to initialise MySQL connector.\n");
         return -1;
     }
-    if (mysql_real_connect(sql, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(sql, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         printf("Failed to connect to MySQL database. (%s)\n", mysql_error(sql));
         mysql_close(sql);
         return -2;
@@ -311,8 +315,8 @@ static enum MHD_Result handleSimpleGet(struct MHD_Connection *conn, const char *
 }
 
 static enum MHD_Result getClientManagementPanel(struct MHD_Connection *conn) {
-    const char* htmlResp1 = load_file("management-index.html.part1");
-    const char* htmlResp2 = load_file("management-index.html.part2");
+    const char* htmlResp1 = load_file(MANAGEMENT_INDEX_1);
+    const char* htmlResp2 = load_file(MANAGEMENT_INDEX_2);
     const char* table = getClientTable();
     char* htmlResp = malloc(strlen(htmlResp1) + strlen(htmlResp2) + strlen(table) + 1);
     printf("%s", table);

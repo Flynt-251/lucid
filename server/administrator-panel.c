@@ -11,6 +11,8 @@
 
 #define MSG_ROOT_NOTICE "NOTE: You are logged in with elevated privileges.\n"
 
+#define SQL_USER "lucid"
+#define SQL_PASS "hyperplane-kumquat-platypus"
 #define SQL_AUTH "SELECT pass, root FROM administrators WHERE email = ?"
 #define SQL_SELECT_ALL_OBS_QUERY "SELECT email FROM observers"
 #define SQL_SELECT_ALL_ADMIN_QUERY "SELECT email, root FROM administrators"
@@ -61,7 +63,7 @@ int verifyUser(const char* username, const char* password) {
         printf("Failed to initialise MySQL connector.\n");
         return -3;
     }
-    if (mysql_real_connect(sql, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(sql, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         printf("Failed to connect to MySQL database. (%s)\n", mysql_error(sql));
         mysql_close(sql);
         return -4;
@@ -162,7 +164,7 @@ int printObserverList() {
         sprintf(errMsg, "Internal Server Error: %s", errMsg);
         return -1;
     }
-    if (mysql_real_connect(con, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         char errMsg[255];
         snprintf(errMsg, sizeof(errMsg), "MySQL Failed to connect to Lucid Database with Error code %i", mysql_errno(con));
@@ -205,7 +207,7 @@ int printAdminList() {
         sprintf(errMsg, "Internal Server Error: %s", errMsg);
         return -1;
     }
-    if (mysql_real_connect(con, "localhost", "root", "root", "lucid", 1, NULL, 0) == NULL) {
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         char errMsg[255];
         snprintf(errMsg, sizeof(errMsg), "MySQL Failed to connect to Lucid Database with Error code %i", mysql_errno(con));
@@ -248,7 +250,7 @@ int newObserver(const char* email) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -319,7 +321,7 @@ int newAdministrator(const char* email) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -388,7 +390,7 @@ int deleteObserver(const char* email) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -451,7 +453,7 @@ int deleteAdministrator(const char* email) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -509,7 +511,7 @@ int resetObserverPassword(const char* email) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -578,7 +580,7 @@ int changeAdminPassword(const char* email, char* passwd) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -644,7 +646,7 @@ int enableRootPriv(const char* email) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);
@@ -712,7 +714,7 @@ int disableRootPriv(const char* email) {
         return -1;
     }
 
-    if (mysql_real_connect(con, "localhost", "root", "root", // hostname, username, password
+    if (mysql_real_connect(con, "localhost", SQL_USER, SQL_PASS, // hostname, username, password
             "lucid", 1, NULL, 0) == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         mysql_close(con);

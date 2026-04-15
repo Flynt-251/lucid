@@ -1,3 +1,5 @@
+CREATE USER 'lucid' IDENTIFIED BY "hyperplane-kumquat-platypus"
+
 CREATE DATABASE IF NOT EXISTS lucid;  
 USE lucid;  
   
@@ -32,3 +34,8 @@ VALUES (
     "$argon2id$v=19$m=65536,t=2,p=1$4paS77+977+977+9RHUoMGbvv73vv73vv70j6pWWzarvv71zSsy477+94paSZg$dsnJVqHLtVsGO50rqMtry4mu42zoTGBRHvlkCAvAPsk",
     FALSE
 );
+
+GRANT SELECT ON lucid.* TO lucid;
+GRANT INSERT ON lucid.* TO lucid;
+GRANT UPDATE ON lucid.* TO lucid;
+GRANT DELETE ON lucid.* TO lucid;
