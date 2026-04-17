@@ -1,4 +1,4 @@
-CREATE USER 'lucid' IDENTIFIED BY "hyperplane-kumquat-platypus"
+CREATE USER 'lucid' IDENTIFIED BY "hyperplane-kumquat-platypus";
 
 CREATE DATABASE IF NOT EXISTS lucid;  
 USE lucid;  
@@ -22,11 +22,11 @@ CREATE TABLE IF NOT EXISTS clientlist (
     rdp      SMALLINT UNSIGNED NOT NULL DEFAULT 3389
 );
 
-INSERT INTO administrators(email, pass, reset, root)
+INSERT INTO administrators(email, pass, root)
 VALUES (
     "root@lucid.lucid",
     "$argon2id$v=19$m=65536,t=2,p=1$uCnApodcpUOwlyE8rdVTaw$zxU5DdYaHM0WH9hchVkwzIhU6Xno+T+4LF4s/fYfAU8",
-    FALSE
+    TRUE
 );
 INSERT INTO observers(email, pass, reset)
 VALUES (

@@ -25,8 +25,8 @@
 #define SQL_SELECT_QUERY "SELECT * FROM clientlist"
 #define MANAGEMENT_RESOURCE_LOCATION "/lucid-management"
 #define MANAGEMENT_INTERNAL_ERROR_RESPONSE "<!DOCTYPE html><head>Lucid - 500</head><body><h1>500 - Internal Server Error</h1></body>"
-#define SERVERKEYFILE "/etc/lucid-server/server.key"
-#define SERVERCERTFILE "/etc/lucid-server/server.pem"
+#define SERVERKEYFILE "/etc/lucid-server/lucid-server.key"
+#define SERVERCERTFILE "/etc/lucid-server/lucid-server.pem"
 #define MANAGEMENT_INDEX_1 "/usr/share/lucid-server/management-index.html.part1"
 #define MANAGEMENT_INDEX_2 "/usr/share/lucid-server/management-index.html.part2"
 

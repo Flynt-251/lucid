@@ -28,7 +28,7 @@ fi
 sudo echo "Sudo access confirmed."
 
 echo "Installing dependencies via DNF..."
-sudo dnf install mariadb-server mariadb-connector-c mariadb-connector-c-devel argon2 libargon2 json-c json-c-devel libmicrohttpd libmicrohttpd-devel openssl openssl-devel
+sudo dnf install --assumeyes mariadb-server mariadb-connector-c mariadb-connector-c-devel argon2 libargon2 libargon2-devel json-c json-c-devel libmicrohttpd libmicrohttpd-devel openssl openssl-devel
 
 if [ "$1" != "--packages-only" ];
 	then
@@ -65,11 +65,14 @@ if [ "$1" != "--packages-only" ];
 
 	echo "Setting up MariaDB, please follow the prompts to proceed through secure installation."
 	echo "This installation script will create a database using the root account. You will need to enter its password after installation."
-	sudo mariadb-secure-installation
 	sudo systemctl start mariadb
 	sudo systemctl enable mariadb
+	sudo mariadb-secure-installation
 	mariadb -u root -p < schema.sql
-	rm schema.sql
+	if [ "$1" != "--manual-build" ];
+		then
+		rm schema.sql
+	fi
 
 	echo "Creating lucid user and paths..."
 	sudo useradd lucid -r -s /usr/sbin/nologin
@@ -95,6 +98,8 @@ if [ "$1" != "--packages-only" ];
 	openssl req -days 365 -out lucid-server.pem -new -x509 -key lucid-server.key -subj "/C=$C/ST=$ST/L=$L/O=$O/OU=$OU/CN=$CN"
 	sudo mv lucid-server.key lucid-server.pem /etc/lucid-server/
 	sudo chown -R lucid:lucid /etc/lucid-server
+	sudo chmod +r /etc/lucid-server/lucid-server.key
+	sudo chmod +r /etc/lucid-server/lucid-server.pem
 
 	echo ""
 	echo "Installation Complete."
