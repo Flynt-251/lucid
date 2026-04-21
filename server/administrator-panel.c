@@ -54,6 +54,21 @@ void strNcpy(char* dest, const char* src, size_t limit) {
     dest[strlen(src)] = '\0';
 }
 
+// Sourced from https://stackoverflow.com/a/15768317
+void randomStr(char *dest, size_t length) {
+    char charset[] = "0123456789"
+                     "abcdefghijklmnopqrstuvwxyz"
+                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+    while (length-- > 0) {
+        size_t index = (double) rand() / RAND_MAX * (sizeof charset - 1);
+        *dest++ = charset[index];
+    }
+    *dest = '\0';
+}
+
+// ---------------------------- DATABASE QUERIES ----------------------------
+
 int verifyUser(const char* username, const char* password) {
     char *sqlAuthCheck = malloc(strlen(SQL_AUTH) + 1);
     strcpy(sqlAuthCheck, SQL_AUTH);
@@ -140,19 +155,6 @@ int verifyUser(const char* username, const char* password) {
     if (out == 0) return -1;
 
     return (short int) rootFlag;
-}
-
-// Sourced from https://stackoverflow.com/a/15768317
-void randomStr(char *dest, size_t length) {
-    char charset[] = "0123456789"
-                     "abcdefghijklmnopqrstuvwxyz"
-                     "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-
-    while (length-- > 0) {
-        size_t index = (double) rand() / RAND_MAX * (sizeof charset - 1);
-        *dest++ = charset[index];
-    }
-    *dest = '\0';
 }
 
 int printObserverList() {
@@ -769,11 +771,14 @@ int disableRootPriv(const char* email) {
     return 0;
 }
 
+// ---------------------------- MAIN ----------------------------
+
 int main() {
     char email[254] = "";
     char passw[254] = "";
     int auth = -1;
 
+    // Authenticate Admin
     printf("Email> ");
     fgets(email, sizeof(email), stdin);
     email[strcspn(email, "\n")] = 0;
@@ -794,35 +799,47 @@ int main() {
     if (auth == 1) printf(MSG_ROOT_NOTICE);
     printf("\n");
 
-
+    // Main CLI Interface
     char cur[355] = "";
     char param[255] = "";
+
+    // Will terminate when "exit" is entered.
     while (0 != strcmp("exit", cur)) {
         auth == 1 ? printf("lucid-panel*> ") : printf("lucid-panel> ");
         fgets(cur, sizeof(cur), stdin);
         cur[strcspn(cur, "\n")] = 0;
 
+        // No input
         if (0 == strcmp("\n", cur))
             continue;
 
+        // help
         if (0 == strcmp("help", cur)) {
             auth == 1 ? printf("%s", HELP_STRING_FULL) : printf("%s", HELP_STRING_LIMITED);
-        } else if (0 == strcmp("ls obs", cur)) { // Print full list of observers
+
+        // ls obs - Print full list of observers
+        } else if (0 == strcmp("ls obs", cur)) {
             printObserverList();
-        } else if (0 == strcmp("ls admin", cur)) { // Print full list of administrators (root only)
+
+        // ls admin - Print full list of administrators (root only)
+        } else if (0 == strcmp("ls admin", cur)) {
             if (auth == 1) {
                 printAdminList();
             } else {
                 printf("Permission Denied.\n");
             }
-        } else if (0 == strncmp("newobs ", cur, 7)) { // Create a new observer with the given email
+
+        // newobs [email] - Create a new observer with the given email
+        } else if (0 == strncmp("newobs ", cur, 7)) {
             strcpy(param, cur+7);
             if (strlen(param) == 0) continue;
             if (newObserver(param) == 0)
                 printf("New observer account created for %s\n", param);
             else
                 printf("Failed to create observer account\n");
-        } else if (0 == strncmp("newadmin ", cur, 9)) { // Create a new admin with the given email (root only)
+
+        // newadmin [email] - Create a new admin with the given email (root only)
+        } else if (0 == strncmp("newadmin ", cur, 9)) { 
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
@@ -833,13 +850,17 @@ int main() {
                 printf("New administrator account created for %s\n", param);
             else
                 printf("Failed to create administrator account\n");
-        } else if (0 == strncmp("rm obs ", cur, 7)) { // Remove an observer
+
+        // rm obs [email] - Remove an observer
+        } else if (0 == strncmp("rm obs ", cur, 7)) {
             strcpy(param, cur+7);
             if (deleteObserver(param) == 0)
                 printf("Observer account deleted.\n");
             else
                 printf("Failed to delete observer account.\n");
-        } else if (0 == strncmp("rm admin ", cur, 9)) { // Remove an admin (root only)
+        
+        // rm admin [email] - Remove an admin (root only)
+        } else if (0 == strncmp("rm admin ", cur, 9)) {
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
@@ -849,13 +870,17 @@ int main() {
                 printf("Administrator account deleted.\n");
             else
                 printf("Failed to delete administrator account.\n");
-        } else if (0 == strncmp("reset ", cur, 6)) { // Reset an observer's password
+
+        // reset [email] - Reset an observer's password
+        } else if (0 == strncmp("reset ", cur, 6)) {
             strcpy(param, cur+6);
             if (resetObserverPassword(param) == 0)
                 printf("Password reset successful\n");
             else
                 printf("Failed to reset password\n");
-        } else if (0 == strncmp("mkroot ", cur, 7)) { // Give an administrator root privileges (root only)
+
+        // mkroot [email] - Give an administrator root privileges (root only)
+        } else if (0 == strncmp("mkroot ", cur, 7)) {
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
@@ -865,7 +890,9 @@ int main() {
                 printf("Root privileges enabled.\n");
             else
                 printf("Could not enable root privileges for this account.\n");
-        } else if (0 == strncmp("rmroot ", cur, 7)) { // Revoke an administrator's root privileges (root only)
+
+        // rmroot [email] - Revoke an administrator's root privileges (root only)
+        } else if (0 == strncmp("rmroot ", cur, 7)) {
             if (auth == 0) {
                 printf("Permission Denied.\n");
                 continue;
@@ -875,7 +902,9 @@ int main() {
                 printf("Root privileges disabled.\n");
             else
                 printf("Could not disable root privileges for this account.\n");
-        } else if (0 == strcmp("passwd", cur)) { // Change own password
+
+        // passwd - Change own password
+        } else if (0 == strcmp("passwd", cur)) {
             printf("Enter new password: ");
             fgets(cur, sizeof(cur), stdin);
             cur[strcspn(cur, "\n")] = 0;

@@ -17,6 +17,7 @@
 #define MACRO_RESTART "sudo shutdown -r now"
 #define MACRO_LOGOUT "qdbus org.kde.Shutdown /Shutdown logout"
 
+// Global flag to ensure client list was properly fetched
 int listFetched = 0;
 
 struct LucidClient {
@@ -30,6 +31,8 @@ struct Mem {
     char *mem;
     size_t size;
 };
+
+// ---------------------------- CURL MEMORY MANAGEMENT ----------------------------
 
 size_t writeMem(void *contents, size_t size, size_t nmemb, void *userp) {
     size_t fullSize = size * nmemb;
@@ -48,6 +51,8 @@ size_t writeMem(void *contents, size_t size, size_t nmemb, void *userp) {
 
     return fullSize;
 }
+
+// ---------------------------- FILE HANDLING ----------------------------
 
 static size_t get_file_size(const char *filename) {
     FILE *fp;
@@ -89,6 +94,8 @@ static char* load_file(const char *filename) {
     return buffer;
 }
 
+// ---------------------------- SSH COMMANDS ----------------------------
+
 int verifyKnownHost(ssh_session ssh) {
     enum ssh_known_hosts_e state;
     unsigned char *hash = NULL;
@@ -107,12 +114,14 @@ int verifyKnownHost(ssh_session ssh) {
     ssh_key_free(serverPublicKey);
     if (rc < 0)
         return -1;
-
+    
     state = ssh_session_is_known_server(ssh);
     switch (state) {
+        // Have connected to this client before
         case SSH_KNOWN_HOSTS_OK:
             break;
-
+            
+        // Hostname is familiar, but its key has changed (could indicate compromisation)
         case SSH_KNOWN_HOSTS_CHANGED:
             fprintf(stderr, "Host key has changed to:\n");
             ssh_print_hash(SSH_PUBLICKEY_HASH_SHA256, hash, hlen);
@@ -120,9 +129,11 @@ int verifyKnownHost(ssh_session ssh) {
             ssh_clean_pubkey_hash(&hash);
             return -1;
         
+        // No .ssh/known_hosts file, will create automatically
         case SSH_KNOWN_HOSTS_NOT_FOUND:
             fprintf(stderr, "Couldn't find a known host file.\nContinue to automatically create it.\n");
 
+        // New client. Prompt user to accept it.
         case SSH_KNOWN_HOSTS_UNKNOWN:
             fprintf(stderr, "This is an unknown server. Do you wish to accept the host key?");
             ssh_print_hash(SSH_PUBLICKEY_HASH_SHA256, hash, hlen);
@@ -141,70 +152,13 @@ int verifyKnownHost(ssh_session ssh) {
     return 0;
 }
 
-void getClientList(char *dest) {
-    CURL *curl;
-    CURLcode res;
-    struct Mem chunk;
-    char email[255];
-    char passwd[255];
-    char basicAuth[512];
-    char* server;
-
-    chunk.mem = malloc(1);
-    chunk.size=0;
-
-    server = load_file(HOSTNAME);
-    if (server == NULL) {
-        printf("Cannot read server hostname file.\n");
-        return;
-    }
-
-    printf("Email: ");
-    fgets(email, sizeof(email), stdin);
-    email[strcspn(email, "\n")] = 0;
-    printf("Password: ");
-    fgets(passwd, sizeof(passwd), stdin);
-    passwd[strcspn(passwd, "\n")] = 0;
-    sprintf(basicAuth, "%s:%s", email, passwd);
-    basicAuth[strlen(basicAuth)] = '\0';
-
-    curl_global_init(CURL_GLOBAL_DEFAULT);
-    curl = curl_easy_init();
-
-    if (curl) {
-        curl_easy_setopt(curl, CURLOPT_URL, "https://localhost:8888/lucid-api");
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeMem);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *) &chunk);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, USER_AGENT);
-        curl_easy_setopt(curl, CURLOPT_USERPWD, basicAuth);
-        // Disable Certificate Checks
-        curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_ALLOW_BEAST | CURLSSLOPT_NO_REVOKE);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
-
-        res = curl_easy_perform(curl);
-        if (res != CURLE_OK) {
-            fprintf(stderr, "Could not perform request: %s\n", curl_easy_strerror(res));
-        } else {
-            // printf("%lu bytes retrieved.\n", (unsigned long) chunk.size);
-            // printf("%s\n", chunk.mem);
-            listFetched = 1;
-            strcpy(dest, chunk.mem);
-        }
-
-        curl_easy_cleanup(curl);
-        free(chunk.mem);
-    }
-
-    curl_global_cleanup();
-}
-
 int sshPerformCommand(ssh_session session, const char *command) {
     ssh_channel channel = NULL;
     int rc;
     char buffer[256];
     int nbytes;
     
+    // Create and configure SSH channel
     channel = ssh_channel_new(session);
     if (channel == NULL)
         return SSH_ERROR;
@@ -222,6 +176,7 @@ int sshPerformCommand(ssh_session session, const char *command) {
         return rc;
     }
     
+    // Fetch output of the given SSH command. This may be useful for getting the result of a command.
     nbytes = ssh_channel_read(channel, buffer, sizeof(buffer), 0);
     while (nbytes > 0) {
         if (write(1, buffer, nbytes) != (unsigned int) nbytes) {
@@ -247,10 +202,11 @@ int sshPerformCommand(ssh_session session, const char *command) {
     return SSH_OK;
 }
 
+// Start SSH Session, then pass over to sshPerformCommand to execute provided instruction
 void connectSSH(struct LucidClient client, const char *command) {
     ssh_session ssh = NULL;
     int rc;
-
+    
     ssh = ssh_new();
     if (ssh == NULL)
         exit(-1);
@@ -264,12 +220,14 @@ void connectSSH(struct LucidClient client, const char *command) {
         return;
     }
 
+    // Determine client authenticity
     if (verifyKnownHost(ssh) < 0) {
         ssh_disconnect(ssh);
         ssh_free(ssh);
         return;
     }
 
+    // Open the SSH channel...
     rc = ssh_userauth_password(ssh, "lucid", "lucid");
     if (rc != SSH_AUTH_SUCCESS) {
         fprintf(stderr, "Authentication Failure: %s\n", ssh_get_error(ssh));
@@ -278,11 +236,15 @@ void connectSSH(struct LucidClient client, const char *command) {
         return;
     }
 
+    // And pass this connection to the command handler.
     sshPerformCommand(ssh, command);
 
+    // Then clean everything up.
     ssh_disconnect(ssh);
     ssh_free(ssh);
 }
+
+// ---------------------------- RDP CONNECTION ----------------------------
 
 void connectRDP(struct LucidClient client) {
     char host[259];
@@ -294,6 +256,75 @@ void connectRDP(struct LucidClient client) {
     perror("Could not start sdl-freerdp.\n");
     return;
 }
+
+// ---------------------------- CONNECTION TO SERVER ----------------------------
+
+// Perform CURL HTTPS request to get JSON client list
+void getClientList(char *dest) {
+    CURL *curl;
+    CURLcode res;
+    struct Mem chunk;
+    char email[255];
+    char passwd[255];
+    char basicAuth[512];
+    char* server;
+
+    chunk.mem = malloc(1);
+    chunk.size=0;
+
+    server = load_file(HOSTNAME);
+    if (server == NULL) {
+        printf("Cannot read server hostname file.\n");
+        return;
+    }
+    server[strcspn(server, "\n")] = 0;
+
+    // Get HTTP Basic Authentication details
+    printf("Email: ");
+    fgets(email, sizeof(email), stdin);
+    email[strcspn(email, "\n")] = 0;
+    printf("Password: ");
+    fgets(passwd, sizeof(passwd), stdin);
+    passwd[strcspn(passwd, "\n")] = 0;
+    sprintf(basicAuth, "%s:%s", email, passwd);
+    basicAuth[strlen(basicAuth)] = '\0';
+
+    // Set up HTTPS request
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl = curl_easy_init();
+
+    if (curl) {
+        curl_easy_setopt(curl, CURLOPT_URL, server);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeMem);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *) &chunk);
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, USER_AGENT);
+        curl_easy_setopt(curl, CURLOPT_USERPWD, basicAuth);
+
+        // Disable Certificate Checks to permit self-signed certificates
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // !!! THIS IS NOT RECOMMENDED AND IS INSECURE! !!!
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_ALLOW_BEAST | CURLSSLOPT_NO_REVOKE);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0);
+
+        // Perform request and place the response data into the dest pointer
+        res = curl_easy_perform(curl);
+        if (res != CURLE_OK) {
+            fprintf(stderr, "Could not perform request: %s\n", curl_easy_strerror(res));
+        } else {
+            listFetched = 1;
+            strcpy(dest, chunk.mem);
+        }
+
+        curl_easy_cleanup(curl);
+        free(chunk.mem);
+    }
+
+    curl_global_cleanup();
+}
+
+// ---------------------------- MAIN ----------------------------
 
 int main() {
     char JSON[4096] = "";
@@ -307,6 +338,7 @@ int main() {
     int log;
     int sshCmd;
 
+    // Get and Parse client list
     getClientList(JSON);
     if (listFetched == 0) return -1;
     json_object *root = json_tokener_parse(JSON);
@@ -328,14 +360,21 @@ int main() {
         printf("%d: %s (%s) SSH: %d, RDP: %d\n", i, Conns[i].hostname, Conns[i].nickname, Conns[i].sshPort, Conns[i].rdpPort);
     }
 
+    // Main observer navigation
     while (1) {
         selection = 257;
+
+        // First, have the user pick a client to connect to.
         while (selection >= numConns) {
             printf("Enter a client to connect to: ");
             fgets(cur, sizeof(cur), stdin);
+
+            // Prompt again on empty response, or allow user to exit.
             if (0 == strcmp("\n", cur)) continue;
             cur[strcspn(cur, "\n")] = 0;
             if (0 == strcmp("exit", cur)) break;
+
+            // Ensure input is an integer, otherwise prompt again.
             validSel = 1;
             for (int i=0; i<strlen(cur); i++)
                 if (!isdigit(cur[i])) validSel = 0;
@@ -343,17 +382,21 @@ int main() {
             selection = atoi(cur);
         }
 
+        // User enters "exit" - observer will terminate.
         if (selection >= numConns) {
             printf("Goodbye.\n");
             break;
         }
     
+        // Client has been selected, prompt user on whether to connect over RDP or SSH.
         while (0 != strcmp("rdp", cur) && 0 != strcmp("ssh", cur)) {
-            printf("Connect via (rdp) or (ssh)? ");
+            printf("Connect via (rdp) or [ssh]? ");
             fgets(cur, sizeof(cur), stdin);
             cur[strcspn(cur, "\n")] = 0;
         }
 
+        // If RDP, fork the observer with a child process that handles the RDP connection.
+        // ... Or default to SSH otherwise.
         if (0 == strcmp("rdp", cur)) {
             sprintf(logName, "sdl-freerdp-out-%lu.log", (unsigned long) time(NULL));
             log = open(logName, O_CREAT|O_WRONLY|O_TRUNC, 0644);
@@ -371,10 +414,12 @@ int main() {
             }    
         } else {
             sshCmd = 10;
-            printf("\nSSH Command options");
+            printf("\nSSH Command options\n");
             printf("1: Shutdown\n");
             printf("2: Restart\n");
             printf("3: Logout (KDE Session)\n");
+
+            // Determine command option
             while (sshCmd >= 4) {
                 printf("Select a command to send (or enter 0 followed by a custom command): ");
                 fgets(cur, sizeof(cur), stdin);

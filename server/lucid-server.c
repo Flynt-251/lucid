@@ -30,12 +30,11 @@
 #define MANAGEMENT_INDEX_1 "/usr/share/lucid-server/management-index.html.part1"
 #define MANAGEMENT_INDEX_2 "/usr/share/lucid-server/management-index.html.part2"
 
-
+// Constants to check whether to authenticate the user using the observers or administrators table
 const unsigned int AUTH_FLAG_OBSERVER = 0;
 const unsigned int AUTH_FLAG_ADMIN = 1;
-char *login;
 
-// Admin Login: flynt@twofiveone.xyz, pass: flynt
+// ---------------------------- FILE HANDLING ----------------------------
 
 static size_t get_file_size(const char *filename) {
     FILE *fp;
@@ -77,23 +76,28 @@ static char* load_file(const char *filename) {
     return buffer;
 }
 
+// ---------------------------- HELPER FUNCTIONS ----------------------------
+
+// Concatenate two strings, ensuring proper null termination and memory allocation
 char* dynamicStrcat(char* str1, char* str2) {
     int len1 = strlen(str1);
     int len2 = strlen(str2);
-    printf("Attempting to concatenate \"%s\" (%d) and \"%s\" (%d), will be %d bytes.\n", str1, len1, str2, len2, len1+len2+1);
     char* out = (char *) malloc(len1 + len2 + 1);
     strcpy(stpcpy(out, str1), str2);
     out[len1+len2] = '\0';
-    printf("Result: %s\n", out);
     return out;
 }
 
+// ---------------------------- DATABASE FETCHES ----------------------------
+
+// Grab client list, and place it into a JSON file.
 const char* getClientList() {
     json_object *root = json_object_new_object();
     json_object_object_add(root, "timestamp", json_object_new_int64((unsigned long) time(NULL)));
     json_object *clientList = json_object_new_array();
 
     MYSQL *con = mysql_init(NULL);
+    // If a connection cannot be made to the database, return the error in the JSON object.
     if (con == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         json_object_object_add(root, "status", json_object_new_int(-1));
@@ -126,7 +130,7 @@ const char* getClientList() {
     }
     MYSQL_RES *res = mysql_store_result(con);
 
-    
+    // If the query was successful, insert each client into the JSON object
     MYSQL_ROW row;
     while ( (row = mysql_fetch_row(res)) ) {
         json_object *client = json_object_new_object();
@@ -151,12 +155,13 @@ const char* getClientList() {
     return json_object_to_json_string_ext(root, 0);
 }
 
+// Create an HTML document containing a table of the clients
 const char* getClientTable() {
-    printf("Initialising output variable for getClientTable...\n");
     char *out = malloc(100 * sizeof(char));
     memset(out, '\0', 100 * sizeof(char));
 
     MYSQL *con = mysql_init(NULL);
+    // If the connection to the database fails, print the error message to stderr
     if (con == NULL) {
         fprintf(stderr, "%s\n", mysql_error(con));
         char errMsg[255];
@@ -183,7 +188,7 @@ const char* getClientTable() {
     }
     MYSQL_RES *res = mysql_store_result(con);
 
-    
+    // Construct table rows
     MYSQL_ROW row;
     while ( (row = mysql_fetch_row(res)) ) {
         char *outputRow = malloc(200 * sizeof(char));
@@ -192,10 +197,8 @@ const char* getClientTable() {
             row[0], row[1], row[2], row[3]
         );
         out = dynamicStrcat(out, outputRow);
-        printf("Added a row to the management document.\n");
         memset(outputRow, '\0', 200 * sizeof(char));
     }
-    printf("Got all rows!");
 
     if (res) {
         mysql_free_result(res);
@@ -206,6 +209,9 @@ const char* getClientTable() {
     return out;
 }
 
+// ---------------------------- HTTP REQUEST HANDLING ----------------------------
+
+// Use HTTP Basic Authentication to authenticate an observer or administrator
 int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
     struct MHD_BasicAuthInfo *auth_info;
     auth_info = MHD_basic_auth_get_username_password3(conn);
@@ -213,6 +219,7 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
         return 0;
 
     char *table;
+    // Is an observer getting the client list, or is an administrator managing the server?
     if (flag == AUTH_FLAG_OBSERVER)
         table = "observers";
     else if (flag == AUTH_FLAG_ADMIN)
@@ -220,6 +227,7 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
     else
         return -10;
 
+    // Construct SQL statement (concatenation is permissible since user input is not being passed)
     char *sqlAuthCheck = malloc(strlen(SQL_AUTH_A) + strlen(SQL_AUTH_B) + strlen(table) + 1);
     strcpy(sqlAuthCheck, SQL_AUTH_A);
     strcat(sqlAuthCheck, table);
@@ -227,10 +235,8 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
 
     char *username = auth_info->username;
     char *password = auth_info->password;
-    // printf("Attempting to copy login data...\n");
-    // strcpy(username, auth_info->username);
-    // strcpy(password, auth_info->password);
-    
+
+    // Connect to MySQL server
     MYSQL *sql = mysql_init(NULL);
     if (sql == NULL) {
         printf("Failed to initialise MySQL connector.\n");
@@ -253,6 +259,7 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
         return -4;
     }
     
+    // Bind inputs (username)
     char sqlUsername[255];
     unsigned long usernameLength;
     MYSQL_BIND bind[1];
@@ -277,6 +284,7 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
         return -6;
     }
     
+    // Get the password associated to this account
     MYSQL_BIND resultBind[1];
     char passHash[254];
     unsigned long passHashLength;
@@ -295,17 +303,20 @@ int verifyUser(struct MHD_Connection *conn, unsigned int flag) {
         printf("Failed to store results table.\n\t%s\n", mysql_stmt_error(stmt));
         return -8;
     }
+    // User does not exist.
     if (mysql_stmt_fetch(stmt)) {
         printf("No results for this authentication query.\n");
         return 0;
     }
 
+    // Verify the hash using neon2 and return the result
     int out = verify(passHash, password);
     mysql_close(sql);
     free(sqlAuthCheck);
     return out;
 }
 
+/* Function not used - use for fetching single basic files, e.g. static HTML
 static enum MHD_Result handleSimpleGet(struct MHD_Connection *conn, const char *filename) {
     char *file = load_file(filename);
     struct MHD_Response *response = MHD_create_response_from_buffer_static(strlen(file), file);
@@ -313,21 +324,22 @@ static enum MHD_Result handleSimpleGet(struct MHD_Connection *conn, const char *
     MHD_destroy_response(response);
     return ret;
 }
+*/
 
+// Load in client management page, fetching client list with a separate function
 static enum MHD_Result getClientManagementPanel(struct MHD_Connection *conn) {
     const char* htmlResp1 = load_file(MANAGEMENT_INDEX_1);
     const char* htmlResp2 = load_file(MANAGEMENT_INDEX_2);
     const char* table = getClientTable();
     char* htmlResp = malloc(strlen(htmlResp1) + strlen(htmlResp2) + strlen(table) + 1);
-    printf("%s", table);
     sprintf(htmlResp, "%s%s%s", htmlResp1, table, htmlResp2);
-    printf("%s", htmlResp);
     struct MHD_Response *response = MHD_create_response_from_buffer_static(strlen(htmlResp), htmlResp);
     enum MHD_Result ret = MHD_queue_response(conn, MHD_HTTP_OK, response);
     MHD_destroy_response(response);
     return ret;
 }
 
+// Main request handler
 static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
  const char *url, const char *method,
  const char *version, const char *upload_data,
@@ -341,6 +353,7 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
     struct MHD_Response *response;
     enum MHD_Result ret;
 
+    // Request is invalid.
     if ((strcmp(JSON_RESOURCE_LOCATION, url) != 0)
      && (strcmp(MANAGEMENT_RESOURCE_LOCATION, url) != 0)) { // 404 if incorrect resource is requested.
         response = MHD_create_response_from_buffer_static(strlen(JSON_NOT_FOUND_RESPONSE), JSON_NOT_FOUND_RESPONSE);
@@ -350,8 +363,10 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
         return ret;
     }
 
+    // Request for JSON client list
     if (strcmp(JSON_RESOURCE_LOCATION, url) == 0) {
         int auth = verifyUser(conn, AUTH_FLAG_OBSERVER);
+        // If the authentication failed due to a database error...
         if (auth < 0) {
             response = MHD_create_response_from_buffer_static(strlen(JSON_INTERNAL_ERROR_RESPONSE), JSON_INTERNAL_ERROR_RESPONSE);
             MHD_add_response_header(response, "Content-Type", "application/json");
@@ -359,6 +374,7 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
             MHD_destroy_response(response);
             return ret;
         }
+        // If the authentication failed because of user error...
         if (auth == 0) {
             response = MHD_create_response_empty(MHD_RF_NONE);
             if (!response)
@@ -368,6 +384,7 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
             return ret;
         }
     
+        // Authentication succeeded, build client list.
         const char *clientList = getClientList();
         response = MHD_create_response_from_buffer_static(strlen(clientList), clientList);
         if (!response)
@@ -378,13 +395,16 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
         return ret;
     }
 
+    // To reach this point, the URL must point to the management interface.
     int auth = verifyUser(conn, AUTH_FLAG_ADMIN);
+    // If the authentication failed due to a database error...
     if (auth < 0) {
         response = MHD_create_response_from_buffer_static(strlen(MANAGEMENT_INTERNAL_ERROR_RESPONSE), MANAGEMENT_INTERNAL_ERROR_RESPONSE);
         ret = MHD_queue_response(conn, MHD_HTTP_INTERNAL_SERVER_ERROR, response);
         MHD_destroy_response(response);
         return ret;
     }
+    // If the authentication failed because of user error...
     if (auth == 0) {
         response = MHD_create_response_empty(MHD_RF_NONE);
         if (!response)
@@ -394,8 +414,11 @@ static enum MHD_Result respondToRequest(void *cls, struct MHD_Connection *conn,
         return ret;
     }
 
+    // Admin authentication succeeded, produce client management page.
     return getClientManagementPanel(conn);
 }
+
+// ---------------------------- MAIN ----------------------------
 
 int main() {
     struct MHD_Daemon *daemon;
@@ -404,6 +427,7 @@ int main() {
     keyPem = load_file(SERVERKEYFILE);
     certPem = load_file(SERVERCERTFILE);
 
+    // Load HTTPS key and certificate
     if ((keyPem == NULL) || (certPem == NULL)) {
         printf("The key or certificate file could not be read.\n");
         if (keyPem != NULL) free(keyPem);
@@ -411,6 +435,7 @@ int main() {
         return 1;
     }
 
+    // Start HTTPS Server
     int flags = MHD_USE_INTERNAL_POLLING_THREAD | MHD_USE_TLS;
     daemon = MHD_start_daemon(flags, PORT, NULL,
      NULL, &respondToRequest, NULL,
@@ -423,6 +448,7 @@ int main() {
         free(certPem);
         return 0;
     }
+    
     printf("HTTPS Server started, press Enter to terminate.\n");
     (void) getchar();
     MHD_stop_daemon(daemon);

@@ -44,6 +44,8 @@ void strNcpy(char* dest, const char* src, size_t limit) {
     dest[strlen(src)] = '\0';
 }
 
+// ---------------------------- DATABASE QUERIES ----------------------------
+
 int verifyUser(const char* username, const char* password) {
     char *sqlAuthCheck = malloc(strlen(SQL_AUTH) + 1);
     strcpy(sqlAuthCheck, SQL_AUTH);
@@ -272,7 +274,6 @@ void getOneClient(const char* hostname, struct lucidClient *dest) {
     strNcpy(dest->nickname, nickname, strlen(nickname));
     dest->port = (short int) port;
     dest->rdp = (short int) rdpPort;
-    printf("Got client. (%d)\n", dest->port);
 
     mysql_close(sql);
 }
@@ -341,14 +342,10 @@ int modifyClient(const char* hostname, const char* nickname, int port, int rdp) 
         return -5;
     }
 
-    printf("Copying Nickname...\n");
     strncpy(sqlNickname, nickname, 32);
-    printf("Setting Nickname length...\n");
     nicknameLen = strlen(sqlNickname);
-    printf("Copying Hostname...\n");
     strncpy(sqlHostname, hostname, 253);
     hostnameLen = strlen(sqlHostname);
-    printf("All data copied.\n");
 
     if (mysql_stmt_execute(stmt)) {
         fprintf(stderr, " mysql_stmt_execute(), 1 failed\n");
@@ -479,16 +476,18 @@ int deleteClient(const char* hostname) {
         fprintf(stderr, " %s\n", mysql_stmt_error(stmt));
         return -6;
     }
-    printf("Affected rows: %llu\n", mysql_affected_rows(con));
 
     mysql_close(con);
     return 0;
 }
 
+// ---------------------------- MAIN ----------------------------
+
 int main() {
     char email[254];
     char passw[254];
 
+    // Authenticate Administrator
     printf("Email> ");
     fgets(email, sizeof(email), stdin);
     email[strcspn(email, "\n")] = 0;
@@ -509,20 +508,30 @@ int main() {
     char cur[355] = "";
     char param[255];
     struct lucidClient client = {"", "", -1, -1};
+
+    // Terminate on typing "exit"
     while (0 != strcmp("exit", cur)) {
         printf("lm> ");
         fgets(cur, sizeof(cur), stdin);
         cur[strcspn(cur, "\n")] = 0;
 
+        // No input
         if (0 == strcmp("\n", cur))
             continue;
 
+        // help
         if (0 == strcmp("help", cur)) {
             printf("%s", HELP_STRING);
-        } else if (0 == strcmp("ls", cur)) { // Print full list of clients
+
+        // ls - Print full list of clients
+        } else if (0 == strcmp("ls", cur)) {
             printClientList();
-        } else if (0 == strncmp("edit ", cur, 5)) { // Edit a single client
+
+        // edit [hostname] - Edit a single client
+        } else if (0 == strncmp("edit ", cur, 5)) {
             strcpy(param, cur+5);
+
+            // Check client exists
             getOneClient(param, &client);
             if (client.port == -1) {
                 printf("Invalid Hostname.\n");
@@ -531,9 +540,13 @@ int main() {
             printf("Found client for %s (alias \"%s\"), accessible at %d and %d over RDP.\nEditing Client...\n\n",
                 param, client.nickname, client.port, client.rdp
             );
+
+            // Get new client data
             char newNickname[32];
             int newPort = -1;
             int newRdp = -1;
+
+            // New nickname (press enter to skip)
             do {
                 printf("Nickname (max. 32 characters): ");
                 fgets(cur, sizeof(cur), stdin);
@@ -545,6 +558,8 @@ int main() {
             } else {
                 strcpy(newNickname, cur);
             }
+
+            // New SSH port (press enter to skip)
             do {
                 printf("Port for Lucid Control [0-35535]: ");
                 fgets(cur, sizeof(cur), stdin);
@@ -560,6 +575,8 @@ int main() {
                 }
                 newPort = atoi(cur);
             } while (newPort > 65535 || newPort < 0);
+
+            // New RDP port (press enter to skip)
             do {
                 printf("Port for RDP remote access [0-35535]: ");
                 fgets(cur, sizeof(cur), stdin);
@@ -575,6 +592,8 @@ int main() {
                 }
                 newRdp = atoi(cur);
             } while (newRdp > 65535 || newRdp < 0);
+
+            // Save new configuration
             printf("Got: {%s, %d, %d}\nSaving new data to client buffer...\n", newNickname, newPort, newRdp);
             client.nickname = newNickname;
             client.port = newPort;
@@ -587,15 +606,21 @@ int main() {
             } else {
                 printf("Failed to update client.\n");
             }
-        } else if (0 == strcmp("add", cur)) { // Add a client
+        
+        // add - Add a client
+        } else if (0 == strcmp("add", cur)) {
             char hostname[253];
             char nickname[32];
             regex_t hostnameComp;
             regex_t ipComp;
+
+            // Initialising RegEx for IP Addresses and Hostnames
             if (regcomp(&hostnameComp, REGEX_DNS, 0) || regcomp(&ipComp, REGEX_IP, 0)) {
                 printf("Failed to initialise at least one regular expression.\n");
                 continue;
             }
+
+            // Get Hostname
             do {
                 printf("Hostname (must be a valid domain or IPv4 address): ");
                 fgets(cur, sizeof(cur), stdin);
@@ -605,12 +630,16 @@ int main() {
                 (0 == regexec(&ipComp, cur, 0, NULL, 0))
             );
             strcpy(hostname, cur);
+
+            // Get Nickname
             do {
                 printf("Nickname (max. 32 characters): ");
                 fgets(cur, sizeof(cur), stdin);
                 cur[strcspn(cur, "\n")] = 0;
             } while (strlen(cur) > 32 || strlen(cur) <= 0);
             strcpy(nickname, cur);
+
+            // Insert client (Ports are set to defaults)
             printf("Attempting to create client %s - Alias: %s, SSH Port: 22, RDP Port: 3389\n",
                 hostname, nickname
             );
@@ -621,13 +650,19 @@ int main() {
             } else {
                 printf("Failed to create client.\n");
             }
-        } else if (0 == strncmp("rm ", cur, 3)) { // Delete a client
+
+        // rm [hostname] - Delete a client
+        } else if (0 == strncmp("rm ", cur, 3)) {
             strcpy(param, cur+3);
+
+            // Check client exists
             getOneClient(param, &client);
             if (client.port == -1) {
                 printf("Invalid Hostname.\n");
                 continue;
             }
+
+            // Confirm and delete
             printf("Found client to remove: %s (alias \"%s\"), accessible at %d and %d over RDP.\nEditing Client...\n\n",
                 param, client.nickname, client.port, client.rdp
             );
