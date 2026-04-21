@@ -11,6 +11,11 @@ else
 fi
 echo ""
 
+read -p "Enter the hostname of the server where client data will be fetched from: " hostname
+
+echo ""
+echo "Assigned server: https://$hostname"
+
 confirm="null"
 while [ "$confirm" != "y" -a "$confirm" != "n" -a "$confirm" != "Y" -a "$confirm" != "N" -a "$confirm" != "" ]; do
 	read -p "Is this okay? [y/N] " confirm
@@ -26,6 +31,10 @@ sudo echo "Sudo access confirmed."
 
 echo "Installing dependencies via DNF..."
 sudo dnf install --assumeyes json-c json-c-devel libcurl libcurl-devel openssl openssl-devel libssh libssh-devel freerdp
+
+sudo mkdir /etc/lucid-observer
+sudo echo "https://$hostname" > /etc/lucid-observer/server
+sudo chmod +r /etc/lucid-observer/server
 
 if [ "$1" != "--packages-only" ];
 	then

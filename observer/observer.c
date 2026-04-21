@@ -11,6 +11,7 @@
 #include <curl/curl.h>
 #include <libssh/libssh.h>
 
+#define HOSTNAME "/etc/lucid-observer/server"
 #define USER_AGENT "libcurl-agent/1.0"
 #define MACRO_SHUTDOWN "sudo shutdown now"
 #define MACRO_RESTART "sudo shutdown -r now"
@@ -46,6 +47,46 @@ size_t writeMem(void *contents, size_t size, size_t nmemb, void *userp) {
     mem->mem[mem->size] = 0;
 
     return fullSize;
+}
+
+static size_t get_file_size(const char *filename) {
+    FILE *fp;
+    fp = fopen(filename, "rb");
+    if (fp) {
+        long size;
+        if ((fseek(fp, 0, SEEK_END) != 0) || ((size = ftell(fp)) == -1)) {
+            size = 0;
+        }
+        fclose(fp);
+        return (size_t) size;
+    }
+    return 0;
+}
+
+static char* load_file(const char *filename) {
+    FILE *fp;
+    char *buffer;
+    size_t size;
+    size = get_file_size(filename);
+
+    if (size == 0)
+        return NULL;
+    fp = fopen(filename, "rb");
+    if (!fp)
+        return NULL;
+
+    buffer = malloc(size + 1);
+    if (!buffer) {
+        fclose(fp);
+        return NULL;
+    }
+    buffer[size] = '\0';
+    if (fread(buffer, 1, size,fp) != size) {
+        free(buffer);
+        return NULL;
+    }
+    fclose(fp);
+    return buffer;
 }
 
 int verifyKnownHost(ssh_session ssh) {
@@ -107,9 +148,16 @@ void getClientList(char *dest) {
     char email[255];
     char passwd[255];
     char basicAuth[512];
+    char* server;
 
     chunk.mem = malloc(1);
     chunk.size=0;
+
+    server = load_file(HOSTNAME);
+    if (server == NULL) {
+        printf("Cannot read server hostname file.\n");
+        return;
+    }
 
     printf("Email: ");
     fgets(email, sizeof(email), stdin);
